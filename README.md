@@ -1,0 +1,292 @@
+# Triage Coins
+
+**Detección y simulación de arbitraje de Bitcoin en tiempo real** entre Kraken, Bybit y OKX.
+
+El proyecto escucha los libros de órdenes por WebSocket, calcula si una oportunidad cross-exchange sigue siendo rentable **después de fees y slippage real**, y simula la ejecución con inventario pre-posicionado, gestión de riesgo y un dashboard en vivo. No mueve fondos reales: es un motor de análisis y simulación pensado para ser honesto con mercados eficientes y transparente cuando se usa feed sintético.
+
+Todo corre en un **monolito Node.js + TypeScript**: la API REST, el stream SSE y el frontend React se sirven desde **un solo proceso y una sola URL** en producción.
+
+---
+
+## Qué hace (en una frase)
+
+Compara precios de **BTC/USDT** en tres exchanges, camina el order book con VWAP, descarta oportunidades que no pagan taker fees, y —si pasan riesgo y anti-flicker— simula compra y venta en paralelo actualizando wallets virtuales por venue.
+
+---
+
+## Por qué existe y qué problema resuelve
+
+En mercados líquidos, las divergencias de precio entre exchanges suelen **desaparecer en neto** en cuanto sumas comisiones taker y el costo real de cruzar el libro. Muchas demos de arbitraje muestran spreads brutos o asumen un slippage fijo del 0,1 %, y eso infla resultados.
+
+Triage Coins prioriza tres cosas:
+
+1. **Precisión económica** — VWAP nivel a nivel, fees taker por exchange, profit neto sin doble conteo de slippage.
+2. **Modelo operativo creíble** — inventario USDT + BTC en cada exchange; no se “transfiere BTC por trade” (eso tarda decenas de minutos on-chain).
+3. **Honestidad en vivo** — en feed real verás sobre todo rechazos por fees; el modo demo inyecta divergencias sintéticas con badge visible para demostrar el pipeline completo.
+
+---
+
+## Decisiones de diseño que importan
+
+### Inventario pre-posicionado (no transferencia por operación)
+
+El arbitraje cross-exchange real asume que **ya tienes BTC y USDT en cada venue**. En cada oportunidad: compras BTC donde está barato (gastas USDT) y vendes BTC donde está caro (recibes USDT), **en paralelo**, sin mover monedas entre exchanges en esa operación.
+
+El inventario deriva con el tiempo. Un **Rebalancer** corrige desbalances cuando el ratio de BTC o USDT cae por debajo de umbrales. El **withdrawal fee de red solo se aplica en rebalanceo**, amortizado sobre muchos trades — no en cada arbitraje simulado. Cobrar withdrawal por trade es un error común en simuladores simplificados.
+
+### Mismo par en todos lados: BTC/USDT
+
+Comparar `BTC/USDT` con `BTC/USD` mezcla basis de stablecoin y genera “arbitrajes” que no son ejecutables de forma consistente. Aquí los tres conectores normalizan **BTC/USDT**.
+
+### Slippage con VWAP, no un porcentaje fijo
+
+El volumen objetivo recorre el libro bid/ask nivel a nivel (`src/utils/vwap.ts`). El profit neto usa los VWAP de compra y venta; el slippage ya está dentro de esos precios:
+
+```
+profit = sellVwap × vol × (1 − feeSell) − buyVwap × vol × (1 + feeBuy)
+```
+
+### Fees taker reales (el arbitraje siempre cruza el spread)
+
+| Exchange | Taker (aprox.) |
+|----------|----------------|
+| Kraken   | 0,26 %         |
+| Bybit    | 0,10 %         |
+| OKX      | 0,10 %         |
+
+Consecuencia esperada en feed **real**: la mayoría de divergencias brutas salen **rejected · fees** en el log. Eso es comportamiento correcto, no un bug.
+
+### Robustez en el hot path
+
+- **Staleness** — quotes más viejos que `STALE_MS` no disparan ejecución.
+- **Anti-flicker** — la divergencia debe persistir `FLICKER_CONFIRM_MS` antes de actuar (filtra artefactos de latencia).
+- **Partial fills** — volumen limitado por profundidad del libro e inventario de wallet.
+- **Circuit breaker** — tras N pérdidas consecutivas, pausa con cooldown.
+- **Latency drift** — entre detección y ejecución simulada se aplica deslizamiento adverso (P&L realista, no best-case).
+
+### Modo demo claramente etiquetado
+
+Los arbitrajes netos positivos son raros en vivo. Con `DEMO_MODE=true` un feed sintético inyecta divergencias para mostrar detección → riesgo → ejecución → P&L → rebalanceo. El dashboard muestra el badge **Demo / Simulated Feed**; nunca debe confundirse con mercado real.
+
+Opcionalmente, `RECORD_FEED=true` graba ticks en `data/*.ndjson` (ignorados por git; pueden pesar mucho).
+
+---
+
+## Arquitectura
+
+```
+Exchanges (WS: Kraken v2, Bybit v5, OKX v5)
+   │  libros normalizados (snapshot + deltas, staleness)
+   ▼
+OrderBookManager ── mejor bid/ask y frescura por venue
+   ▼
+ArbitrageEngine ── matriz N×N · VWAP · profit neto · scoring · anti-flicker
+   ▼
+RiskManager ── umbral mínimo · circuit breaker · pause/resume
+   ▼
+ExecutionSimulator ── partial fills · latency drift · wallets
+   ▼                         ▲
+Rebalancer ── corrección de inventario (withdrawal fee en rebalanceo)
+   ▼
+Store (in-memory) + FeedRecorder (NDJSON opcional)
+   ▼
+API REST + SSE ──► Dashboard React
+```
+
+**SSE para el dashboard** — el flujo servidor→cliente es unidireccional; SSE reconecta sobre HTTP sin un segundo WebSocket hacia el navegador.
+
+**Monolito en Railway** — el motor necesita conexiones WS persistentes y estado en memoria continuo; no encaja en serverless efímero. Un proceso Node sirve `/api`, `/api/stream` y los estáticos de `web/dist`.
+
+Cada pieza en `src/core/` está desacoplada y es testeable por separado.
+
+---
+
+## Stack
+
+| Capa        | Tecnología                                      |
+|-------------|-------------------------------------------------|
+| Runtime     | Node.js 20+, TypeScript (strict), `tsx`         |
+| HTTP        | Express — REST + SSE                            |
+| Feeds       | WebSocket nativo (`ws`) — APIs públicas         |
+| Frontend    | React 18, Vite, Tailwind CSS v3                 |
+| Estado      | In-memory (sin base de datos)                   |
+| Deploy      | [Railway](https://railway.app) — Nixpacks vía `railway.json` |
+
+No se requieren API keys: los feeds de mercado son públicos.
+
+---
+
+## Estructura del repositorio
+
+```
+src/
+  index.ts              Entrypoint Express (API + SSE + estáticos)
+  app.ts                Orquestador: feeds, ticks, snapshot, controles
+  config.ts             Fees, capital, umbrales (env + defaults)
+  runtime.ts            Flags mutables en runtime (demo, umbral, max trade)
+  types.ts              Tipos de dominio
+  exchanges/            Conectores WS (Kraken, Bybit, OKX) + LocalBook
+  core/                 Motor: books, arbitraje, riesgo, ejecución, wallets, store
+  demo/                 Feed sintético + recorder NDJSON
+  server/               routes.ts, sse.ts
+  utils/                vwap.ts, logger, ids (+ tests)
+web/
+  src/                  Dashboard (StatsBar, PriceMatrix, PnL, TradeLog, Wallets, Controls)
+railway.json            Build/start/healthcheck para Railway
+.env.example            Variables documentadas (sin secretos)
+```
+
+---
+
+## Dashboard
+
+El frontend consume solo la API del mismo origen (en dev, Vite hace proxy de `/api` al backend).
+
+| Panel | Contenido |
+|-------|-----------|
+| **Stats bar** | P&L realizado, trades, rechazos, ticks, ms/tick del motor, estado LIVE/OFFLINE, circuit breaker |
+| **Price matrix** | Mejor bid/ask por exchange y frescura |
+| **P&L chart** | Serie temporal de beneficio simulado |
+| **Trade log** | Ejecuciones y rechazos con motivo |
+| **Wallets** | USDT y BTC por venue + rebalanceos recientes |
+| **Opportunity feed** | Oportunidades detectadas (ejecutadas o no) |
+| **Controls** | Pausa/reanudar, reset, demo on/off, umbral de edge mínimo, max BTC por trade |
+
+---
+
+## Empezar en local
+
+**Requisito:** Node.js 20 o superior.
+
+```bash
+# Instalar dependencias (raíz + frontend)
+npm install
+npm --prefix web install
+```
+
+### Desarrollo (dos procesos)
+
+```bash
+npm run dev          # Backend con autoreload en :8080
+npm run dev:web      # Vite en :5173 (proxy /api → :8080)
+```
+
+### Producción local (un solo proceso)
+
+```bash
+npm run build        # Genera web/dist
+npm start            # http://localhost:8080
+```
+
+### Modo demo (presentación o prueba del pipeline)
+
+```powershell
+# Windows PowerShell
+$env:DEMO_MODE="true"; npm start
+```
+
+```bash
+# Linux / macOS
+DEMO_MODE=true npm start
+```
+
+Abre la URL y confirma el badge **Demo / Simulated Feed**. Desde el panel Controls puedes alternar demo, umbral y pausa sin reiniciar.
+
+### Calidad de código
+
+```bash
+npm run typecheck    # TypeScript backend + frontend
+npm test             # Tests unitarios (node:test), p. ej. VWAP/profit
+```
+
+Antes de desplegar conviene pasar los tres: `typecheck`, `test` y `build`.
+
+---
+
+## Variables de entorno
+
+Copia `.env.example` a `.env` si quieres overrides locales. Todas son opcionales.
+
+| Variable | Default | Descripción |
+|----------|---------|-------------|
+| `PORT` | `8080` | Puerto HTTP |
+| `DEMO_MODE` | `false` | Feed sintético con divergencias inyectadas |
+| `MIN_NET_PROFIT_PCT` | `0.0005` | Edge neto mínimo para ejecutar (0,05 %) |
+| `MAX_TRADE_BTC` | `0.25` | Volumen máximo por trade simulado |
+| `STALE_MS` | `3000` | Ignorar quotes más viejos que esto |
+| `FLICKER_CONFIRM_MS` | `150` | Persistencia mínima antes de ejecutar |
+| `LATENCY_MS` | `120` | Latencia simulada detección → ejecución |
+| `LATENCY_SLIPPAGE_BPS` | `2` | Drift adverso de precio durante la latencia |
+| `CIRCUIT_BREAKER_LOSSES` | `5` | Pérdidas seguidas antes de pausar |
+| `CIRCUIT_BREAKER_COOLDOWN_MS` | `15000` | Cooldown del circuit breaker |
+| `INITIAL_USDT` | `50000` | USDT inicial por exchange |
+| `INITIAL_BTC` | `0.5` | BTC inicial por exchange |
+| `RECORD_FEED` | `false` | Graba ticks en `data/*.ndjson` |
+
+Umbral, volumen máximo y demo también se cambian en vivo desde el dashboard.
+
+---
+
+## API HTTP
+
+Respuestas REST siguen la forma `{ success, data?, error? }`.
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| `GET` | `/api/health` | Healthcheck (Railway) |
+| `GET` | `/api/state` | Snapshot completo del estado |
+| `GET` | `/api/stream` | **SSE** — snapshots en tiempo real |
+| `POST` | `/api/control/pause` | Pausar motor |
+| `POST` | `/api/control/resume` | Reanudar |
+| `POST` | `/api/control/reset` | Reiniciar estado simulado |
+| `POST` | `/api/control/demo` | `{ "enabled": boolean }` |
+| `POST` | `/api/control/threshold` | `{ "pct": number }` |
+| `POST` | `/api/control/max-trade` | `{ "btc": number }` |
+
+---
+
+## Deploy en Railway
+
+El repo incluye `railway.json` con Nixpacks (no hace falta Dockerfile).
+
+1. Crea un proyecto en [Railway](https://railway.app) conectado a este repositorio.
+2. Elige región **EU (Frankfurt o Amsterdam)** — algunos exchanges bloquean o degradan conexiones desde IPs de datacenter en US.
+3. Railway ejecutará:
+   - **Build:** `npm run build` (instala y compila el frontend)
+   - **Start:** `npm start`
+   - **Healthcheck:** `GET /api/health`
+4. Variables de entorno: opcionales; los defaults permiten arrancar sin configurar nada.
+5. Abre la URL pública: badge **LIVE**, tres venues en la price matrix, y —en mercado real— sobre todo oportunidades rechazadas por fees (esperado).
+
+Para una demo con actividad visible en pocos segundos, define `DEMO_MODE=true` en Railway o actívalo desde Controls.
+
+---
+
+## Qué esperar en producción con feed real
+
+- Conexión estable a los tres WebSockets.
+- Motor procesando ticks en sub-milisegundo medio (visible como **Engine /tick**).
+- Pocas o ninguna ejecución rentable en neto; muchos eventos `rejected · fees`.
+- Wallets y rebalanceos reflejando el modelo de inventario, no transferencias por trade.
+
+Eso no indica que el bot “no funcione”: indica que el filtro económico es estricto.
+
+---
+
+## Roadmap
+
+- Más exchanges (nuevo conector en `src/exchanges/` siguiendo el patrón base).
+- Arbitraje triangular (misma exchange, otra ruta de precios).
+- Replay determinista desde NDJSON grabado (hoy: recorder; loader en evolución).
+
+---
+
+## Licencia
+
+MIT — ver archivo `LICENSE` cuando se añada al repositorio.
+
+---
+
+## Créditos y contexto
+
+Proyecto de detección y simulación educativa/experimental de arbitraje BTC. No es asesoramiento financiero ni ejecución real de órdenes. Los fees y umbrales reflejan configuración documentada en código; verifica siempre las tablas oficiales de cada exchange antes de operar con capital real.

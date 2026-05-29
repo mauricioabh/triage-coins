@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+web/node_modules/
+
+# Build output
+dist/
+web/dist/
+
+# Environment & secrets
+.env
+.env.local
+.env.*.local
+
+# Local agent / IDE (not part of the product)
+.cursor/
+AGENTS.md
+
+# Recorded feeds (can grow large)
+data/
+*.ndjson
+
+# Logs & OS
+*.log
+.DS_Store
+Thumbs.db
