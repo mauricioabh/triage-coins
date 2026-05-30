@@ -1,7 +1,6 @@
-import { config } from "../config.js";
-import { nextId } from "../utils/ids.js";
 import type { Opportunity, Trade } from "../types.js";
-import type { WalletBook } from "./wallets.js";
+import type { IIdGenerator, IInventory, ITradeExecutor, TradingPolicy } from "./ports.js";
+import { netProfit, netProfitPct, takerFeeCost } from "./pricing.js";
 
 /**
  * Simulates execution of a validated opportunity:
@@ -10,28 +9,36 @@ import type { WalletBook } from "./wallets.js";
  *  - Updates per-exchange wallets under the pre-positioned inventory model.
  * Volume/liquidity/wallet caps are already applied upstream by the engine, so
  * the trade here is the (possibly partial) fill the engine decided on.
+ *
+ * The net-profit formula lives in `pricing.ts` and is shared with the engine.
  */
-export class ExecutionSimulator {
-  constructor(private readonly wallets: WalletBook) {}
+export class ExecutionSimulator implements ITradeExecutor {
+  constructor(
+    private readonly inventory: IInventory,
+    private readonly policy: TradingPolicy,
+    private readonly ids: IIdGenerator,
+  ) {}
 
   execute(op: Opportunity, now: number): Trade {
-    const drift = config.latencySlippageBps / 10_000;
+    const drift = this.policy.latencySlippageBps() / 10_000;
     const execBuyVwap = op.buyVwap * (1 + drift);
     const execSellVwap = op.sellVwap * (1 - drift);
 
-    const feeBuy = execBuyVwap * op.volumeBtc * config.takerFees[op.buyExchange];
-    const feeSell = execSellVwap * op.volumeBtc * config.takerFees[op.sellExchange];
+    const feeBuyRate = this.policy.takerFee(op.buyExchange);
+    const feeSellRate = this.policy.takerFee(op.sellExchange);
+    const feeBuy = takerFeeCost(execBuyVwap, op.volumeBtc, feeBuyRate);
+    const feeSell = takerFeeCost(execSellVwap, op.volumeBtc, feeSellRate);
 
     const quoteCost = execBuyVwap * op.volumeBtc + feeBuy;
     const quoteProceeds = execSellVwap * op.volumeBtc - feeSell;
-    const netProfit = quoteProceeds - quoteCost;
+    const net = netProfit(execBuyVwap, execSellVwap, op.volumeBtc, feeBuyRate, feeSellRate);
 
-    this.wallets.applyBuy(op.buyExchange, op.volumeBtc, quoteCost);
-    this.wallets.applySell(op.sellExchange, op.volumeBtc, quoteProceeds);
+    this.inventory.applyBuy(op.buyExchange, op.volumeBtc, quoteCost);
+    this.inventory.applySell(op.sellExchange, op.volumeBtc, quoteProceeds);
 
     const notional = execBuyVwap * op.volumeBtc;
     return {
-      id: nextId("trade"),
+      id: this.ids.next("trade"),
       ts: now,
       buyExchange: op.buyExchange,
       sellExchange: op.sellExchange,
@@ -43,8 +50,8 @@ export class ExecutionSimulator {
       execSellVwap,
       feeBuy,
       feeSell,
-      netProfit,
-      netProfitPct: notional > 0 ? netProfit / notional : 0,
+      netProfit: net,
+      netProfitPct: netProfitPct(net, notional),
       partial: op.status === "executed_partial",
       demo: op.demo,
     };

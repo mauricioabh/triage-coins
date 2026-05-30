@@ -1,5 +1,6 @@
 import { EXCHANGE_IDS, type ExchangeId, type Level, type OrderBook } from "../types.js";
 import { createLogger } from "../utils/logger.js";
+import type { MarketDataFeed } from "../core/ports.js";
 
 const log = createLogger("demo");
 
@@ -15,7 +16,7 @@ type BookListener = (book: OrderBook) => void;
  * Every book it emits is flagged demo upstream; nothing here is presented as
  * real market data.
  */
-export class SyntheticFeed {
+export class SyntheticFeed implements MarketDataFeed {
   private listeners: BookListener[] = [];
   private timer: NodeJS.Timeout | null = null;
   private mid = 100_000;

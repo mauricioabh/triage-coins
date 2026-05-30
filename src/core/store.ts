@@ -1,12 +1,13 @@
 import { config } from "../config.js";
 import type { CircuitState, Opportunity, PnlPoint, RebalanceEvent, Trade } from "../types.js";
+import type { IStateStore } from "./ports.js";
 
 /**
  * In-memory state store: rolling history of opportunities, trades, rebalances
  * and the cumulative P&L curve. Bounded buffers keep memory flat during long
  * demos. Durable history is provided separately by the NDJSON feed recorder.
  */
-export class Store {
+export class Store implements IStateStore {
   readonly startedAt = Date.now();
 
   private opportunities: Opportunity[] = [];

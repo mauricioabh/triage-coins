@@ -1,9 +1,6 @@
-import { config } from "../config.js";
-import { nextId } from "../utils/ids.js";
 import { createLogger } from "../utils/logger.js";
 import { EXCHANGE_IDS, type ExchangeId } from "../types.js";
-import type { WalletBook } from "./wallets.js";
-import type { Store } from "./store.js";
+import type { IIdGenerator, IInventory, IStateStore, TradingPolicy } from "./ports.js";
 
 const log = createLogger("rebalancer");
 
@@ -18,18 +15,23 @@ const log = createLogger("rebalancer");
 export class Rebalancer {
   private lastRun = 0;
 
-  constructor(private readonly wallets: WalletBook, private readonly store: Store) {}
+  constructor(
+    private readonly inventory: IInventory,
+    private readonly store: IStateStore,
+    private readonly policy: TradingPolicy,
+    private readonly ids: IIdGenerator,
+  ) {}
 
   tick(now: number): void {
-    if (now - this.lastRun < config.rebalanceIntervalMs) return;
+    if (now - this.lastRun < this.policy.rebalanceIntervalMs()) return;
     this.lastRun = now;
 
-    this.rebalanceAsset("BTC", config.initialBtc * config.rebalanceMinBtcRatio, now);
-    this.rebalanceAsset("USDT", config.initialUsdt * config.rebalanceMinUsdtRatio, now);
+    this.rebalanceAsset("BTC", this.policy.rebalanceMinBtc(), now);
+    this.rebalanceAsset("USDT", this.policy.rebalanceMinUsdt(), now);
   }
 
   private amountOf(exchange: ExchangeId, asset: "BTC" | "USDT"): number {
-    const w = this.wallets.get(exchange);
+    const w = this.inventory.get(exchange);
     return asset === "BTC" ? w.btc : w.usdt;
   }
 
@@ -59,11 +61,11 @@ export class Rebalancer {
     const amount = target - minVal;
     if (amount <= 0) return;
 
-    const fee = asset === "BTC" ? config.withdrawalFeesBtc[richest] : 1; // ~1 USDT internal/stable transfer fee
-    this.wallets.applyTransfer(richest, poorest, asset, amount, fee);
+    const fee = asset === "BTC" ? this.policy.withdrawalFeeBtc(richest) : 1; // ~1 USDT internal/stable transfer fee
+    this.inventory.applyTransfer(richest, poorest, asset, amount, fee);
 
     this.store.addRebalance({
-      id: nextId("rebal"),
+      id: this.ids.next("rebal"),
       ts: now,
       fromExchange: richest,
       toExchange: poorest,

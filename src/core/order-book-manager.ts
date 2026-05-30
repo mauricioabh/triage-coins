@@ -6,13 +6,14 @@ import {
   type FeedStatus,
   type OrderBook,
 } from "../types.js";
+import type { IQuoteBook } from "./ports.js";
 
 /**
  * Holds the latest normalized order book per exchange and derives best
  * bid/ask quotes with staleness detection. The hot path (read best/book) is
  * O(1) map access.
  */
-export class OrderBookManager {
+export class OrderBookManager implements IQuoteBook {
   private books = new Map<ExchangeId, OrderBook>();
 
   update(book: OrderBook): void {

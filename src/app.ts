@@ -1,7 +1,9 @@
 import { config } from "./config.js";
 import { runtime, runtimeDefaults } from "./runtime.js";
 import { createLogger } from "./utils/logger.js";
-import { createConnector, type ExchangeConnector } from "./exchanges/index.js";
+import { SystemClock } from "./utils/clock.js";
+import { IdGenerator } from "./utils/ids.js";
+import { ConnectorFactory } from "./exchanges/index.js";
 import { OrderBookManager } from "./core/order-book-manager.js";
 import { WalletBook } from "./core/wallets.js";
 import { Store } from "./core/store.js";
@@ -9,6 +11,8 @@ import { RiskManager } from "./core/risk-manager.js";
 import { ExecutionSimulator } from "./core/execution-simulator.js";
 import { ArbitrageEngine } from "./core/arbitrage-engine.js";
 import { Rebalancer } from "./core/rebalancer.js";
+import { RuntimeTradingPolicy } from "./core/trading-policy.js";
+import type { MarketDataFeed, MarketDataFeedFactory } from "./core/ports.js";
 import { SyntheticFeed } from "./demo/synthetic-feed.js";
 import { FeedRecorder } from "./demo/recorder.js";
 import { EXCHANGE_IDS, type ConfigPatch, type ExchangeId, type OrderBook, type PublicConfig, type StateSnapshot } from "./types.js";
@@ -30,29 +34,35 @@ export class App {
   private readonly obm = new OrderBookManager();
   private readonly wallets = new WalletBook();
   private readonly store = new Store();
+  private readonly policy = new RuntimeTradingPolicy();
+  private readonly clock = new SystemClock();
+  private readonly ids = new IdGenerator();
   private readonly risk: RiskManager;
   private readonly exec: ExecutionSimulator;
   private readonly engine: ArbitrageEngine;
   private readonly rebalancer: Rebalancer;
   private readonly recorder = new FeedRecorder();
 
-  private connectors = new Map<ExchangeId, ExchangeConnector>();
+  private readonly feedFactory: MarketDataFeedFactory = new ConnectorFactory();
+  private connectors = new Map<ExchangeId, MarketDataFeed>();
   private synthetic = new SyntheticFeed();
   private tickTimer: NodeJS.Timeout | null = null;
   private feedMode: "real" | "demo" | "stopped" = "stopped";
 
   constructor() {
-    this.risk = new RiskManager(this.store);
-    this.exec = new ExecutionSimulator(this.wallets);
+    this.risk = new RiskManager(this.store, this.policy);
+    this.exec = new ExecutionSimulator(this.wallets, this.policy, this.ids);
     this.engine = new ArbitrageEngine({
-      obm: this.obm,
-      wallets: this.wallets,
+      quotes: this.obm,
+      inventory: this.wallets,
       store: this.store,
       risk: this.risk,
-      exec: this.exec,
-      isDemo: () => runtime.demoMode,
+      executor: this.exec,
+      policy: this.policy,
+      clock: this.clock,
+      ids: this.ids,
     });
-    this.rebalancer = new Rebalancer(this.wallets, this.store);
+    this.rebalancer = new Rebalancer(this.wallets, this.store, this.policy, this.ids);
   }
 
   start(): void {
@@ -93,7 +103,7 @@ export class App {
 
   private startConnector(id: ExchangeId): void {
     if (this.connectors.has(id)) return;
-    const connector = createConnector(id);
+    const connector = this.feedFactory.create(id);
     connector.onBook((book) => this.handleBook(book));
     connector.start();
     this.connectors.set(id, connector);

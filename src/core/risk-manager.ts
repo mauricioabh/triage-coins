@@ -1,6 +1,5 @@
-import { config } from "../config.js";
 import { createLogger } from "../utils/logger.js";
-import type { Store } from "./store.js";
+import type { IRiskGate, IStateStore, TradingPolicy } from "./ports.js";
 
 const log = createLogger("risk");
 
@@ -12,20 +11,24 @@ const log = createLogger("risk");
  * Detection keeps running while paused — we still surface opportunities, we just
  * don't execute them.
  */
-export class RiskManager {
+export class RiskManager implements IRiskGate {
   private trippedUntil = 0;
 
-  constructor(private readonly store: Store) {}
+  constructor(
+    private readonly store: IStateStore,
+    private readonly policy: TradingPolicy,
+  ) {}
 
   /** Call after every trade to evaluate the circuit breaker. */
   evaluate(now: number): void {
     if (this.store.circuit === "paused") return;
-    if (this.store.consecutiveLosses >= config.circuitBreakerLosses) {
-      this.trippedUntil = now + config.circuitBreakerCooldownMs;
+    if (this.store.consecutiveLosses >= this.policy.circuitBreakerLosses()) {
+      const cooldownMs = this.policy.circuitBreakerCooldownMs();
+      this.trippedUntil = now + cooldownMs;
       this.store.circuit = "tripped";
       log.warn(
         `circuit breaker tripped after ${this.store.consecutiveLosses} consecutive losses; ` +
-          `cooling down ${config.circuitBreakerCooldownMs}ms`,
+          `cooling down ${cooldownMs}ms`,
       );
     }
   }

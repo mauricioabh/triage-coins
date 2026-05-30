@@ -1,5 +1,6 @@
 import { config } from "../config.js";
 import { EXCHANGE_IDS, type ExchangeId, type Wallet } from "../types.js";
+import type { IInventory } from "./ports.js";
 
 /**
  * Pre-positioned inventory model: every exchange starts with both USDT and BTC.
@@ -7,7 +8,7 @@ import { EXCHANGE_IDS, type ExchangeId, type Wallet } from "../types.js";
  * another (receives USDT) simultaneously, WITHOUT moving coins between venues.
  * Inventory drifts over time and is corrected by the Rebalancer.
  */
-export class WalletBook {
+export class WalletBook implements IInventory {
   private wallets = new Map<ExchangeId, Wallet>();
 
   constructor() {

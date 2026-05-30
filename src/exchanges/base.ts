@@ -1,6 +1,7 @@
 import WebSocket from "ws";
 import type { ExchangeId, OrderBook } from "../types.js";
 import { createLogger, type Logger } from "../utils/logger.js";
+import type { MarketDataFeed } from "../core/ports.js";
 import { LocalBook } from "./local-book.js";
 
 export type BookListener = (book: OrderBook) => void;
@@ -10,7 +11,7 @@ export type BookListener = (book: OrderBook) => void;
  * heartbeat/ping, and a normalized order book emit. Subclasses implement
  * exchange-specific URL, subscription payload, and message parsing.
  */
-export abstract class ExchangeConnector {
+export abstract class ExchangeConnector implements MarketDataFeed {
   abstract readonly id: ExchangeId;
   protected abstract readonly url: string;
   protected readonly depth = 15;

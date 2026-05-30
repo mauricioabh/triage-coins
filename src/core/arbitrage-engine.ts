@@ -1,6 +1,3 @@
-import { config } from "../config.js";
-import { runtime } from "../runtime.js";
-import { nextId } from "../utils/ids.js";
 import { walkBook, totalDepthBtc } from "../utils/vwap.js";
 import {
   EXCHANGE_IDS,
@@ -9,22 +6,31 @@ import {
   type OpportunityStatus,
   type OrderBook,
 } from "../types.js";
-import type { OrderBookManager } from "./order-book-manager.js";
-import type { WalletBook } from "./wallets.js";
-import type { Store } from "./store.js";
-import type { RiskManager } from "./risk-manager.js";
-import type { ExecutionSimulator } from "./execution-simulator.js";
+import type {
+  IClock,
+  IIdGenerator,
+  IInventory,
+  IQuoteBook,
+  IRiskGate,
+  IStateStore,
+  ITradeExecutor,
+  TradingPolicy,
+} from "./ports.js";
+import { netProfit, netProfitPct, takerFeeCost } from "./pricing.js";
 
 const DUST_BTC = 1e-5;
 const REJECT_THROTTLE_MS = 800;
 
+/** Collaborators are ports (interfaces), never concrete classes. */
 interface EngineDeps {
-  obm: OrderBookManager;
-  wallets: WalletBook;
-  store: Store;
-  risk: RiskManager;
-  exec: ExecutionSimulator;
-  isDemo: () => boolean;
+  quotes: IQuoteBook;
+  inventory: IInventory;
+  store: IStateStore;
+  risk: IRiskGate;
+  executor: ITradeExecutor;
+  policy: TradingPolicy;
+  clock: IClock;
+  ids: IIdGenerator;
 }
 
 /**
@@ -37,8 +43,8 @@ interface EngineDeps {
  *   5. requires the edge to persist (anti-flicker) before executing,
  *   6. defers to the risk manager (circuit breaker) before executing.
  *
- * Net profit formula (slippage already inside the VWAPs — never double-counted):
- *   profit = sellVwap * vol * (1 - feeSell) - buyVwap * vol * (1 + feeBuy)
+ * Net profit formula lives in `pricing.ts` (shared with the executor); slippage
+ * is already inside the VWAPs — never double-counted.
  */
 export class ArbitrageEngine {
   /** firstProfitableTs per pair, for anti-flicker confirmation. */
@@ -50,9 +56,9 @@ export class ArbitrageEngine {
 
   onBook(book: OrderBook): void {
     const start = performance.now();
-    this.deps.obm.update(book);
+    this.deps.quotes.update(book);
     this.deps.store.ticksProcessed += 1;
-    this.evaluate(Date.now());
+    this.evaluate(this.deps.clock.now());
     this.deps.store.recordTickTime(performance.now() - start);
   }
 
@@ -72,8 +78,8 @@ export class ArbitrageEngine {
 
   private evaluatePair(buy: ExchangeId, sell: ExchangeId, now: number): void {
     const key = `${buy}->${sell}`;
-    const buyBook = this.deps.obm.getBook(buy);
-    const sellBook = this.deps.obm.getBook(sell);
+    const buyBook = this.deps.quotes.getBook(buy);
+    const sellBook = this.deps.quotes.getBook(sell);
     const topAsk = buyBook?.asks[0];
     const topBid = sellBook?.bids[0];
 
@@ -89,21 +95,21 @@ export class ArbitrageEngine {
     }
 
     // A raw cross exists. Stale data is untrustworthy.
-    if (!this.deps.obm.isFresh(buy, now) || !this.deps.obm.isFresh(sell, now)) {
+    if (!this.deps.quotes.isFresh(buy, now) || !this.deps.quotes.isFresh(sell, now)) {
       this.emitRejection(buy, sell, topAsk.price, topBid.price, "rejected_stale", "stale quote", now);
       this.pending.delete(key);
       return;
     }
 
-    const feeBuyRate = config.takerFees[buy];
-    const feeSellRate = config.takerFees[sell];
+    const feeBuyRate = this.deps.policy.takerFee(buy);
+    const feeSellRate = this.deps.policy.takerFee(sell);
 
     // Cap volume by depth on both sides and by wallet inventory.
     const askDepth = totalDepthBtc(buyBook.asks);
     const bidDepth = totalDepthBtc(sellBook.bids);
-    const buyable = this.deps.wallets.maxBuyableBtc(buy, topAsk.price * (1 + feeBuyRate));
-    const sellable = this.deps.wallets.sellableBtc(sell);
-    const requested = runtime.maxTradeBtc;
+    const buyable = this.deps.inventory.maxBuyableBtc(buy, topAsk.price * (1 + feeBuyRate));
+    const sellable = this.deps.inventory.sellableBtc(sell);
+    const requested = this.deps.policy.maxTradeBtc();
     const target = Math.min(requested, askDepth, bidDepth, buyable, sellable);
 
     if (target < DUST_BTC) {
@@ -123,11 +129,11 @@ export class ArbitrageEngine {
 
     const buyVwap = buySide.vwap;
     const sellVwap = sellSide.vwap;
-    const feeBuy = buyVwap * volume * feeBuyRate;
-    const feeSell = sellVwap * volume * feeSellRate;
-    const netProfit = sellVwap * volume * (1 - feeSellRate) - buyVwap * volume * (1 + feeBuyRate);
+    const feeBuy = takerFeeCost(buyVwap, volume, feeBuyRate);
+    const feeSell = takerFeeCost(sellVwap, volume, feeSellRate);
+    const net = netProfit(buyVwap, sellVwap, volume, feeBuyRate, feeSellRate);
     const notional = buyVwap * volume;
-    const netProfitPct = notional > 0 ? netProfit / notional : 0;
+    const netPct = netProfitPct(net, notional);
     const partial = volume < requested - DUST_BTC;
 
     const base = {
@@ -140,13 +146,13 @@ export class ArbitrageEngine {
       sellVwap,
       feeBuy,
       feeSell,
-      netProfit,
-      netProfitPct,
+      netProfit: net,
+      netProfitPct: netPct,
       now,
     };
 
     // Not enough edge to cover real costs.
-    if (netProfitPct <= runtime.minNetProfitPct) {
+    if (netPct <= this.deps.policy.minNetProfitPct()) {
       this.emitRejection(buy, sell, topAsk.price, topBid.price, "rejected_fees", "net edge below threshold", now);
       this.pending.delete(key);
       return;
@@ -155,7 +161,7 @@ export class ArbitrageEngine {
     // Anti-flicker: the edge must persist before we trust it.
     const firstTs = this.pending.get(key) ?? now;
     if (!this.pending.has(key)) this.pending.set(key, now);
-    if (now - firstTs < runtime.flickerConfirmMs) {
+    if (now - firstTs < this.deps.policy.flickerConfirmMs()) {
       this.emit({ ...base, status: "pending_confirm", reason: "confirming edge persistence", partial }, true);
       return;
     }
@@ -169,7 +175,7 @@ export class ArbitrageEngine {
 
     const status: OpportunityStatus = partial ? "executed_partial" : "executed";
     const opportunity = this.emit({ ...base, status, reason: "executed", partial }, false);
-    const trade = this.deps.exec.execute(opportunity, now);
+    const trade = this.deps.executor.execute(opportunity, now);
     this.deps.store.addTrade(trade);
     this.deps.risk.evaluate(now);
     this.pending.delete(key);
@@ -192,7 +198,7 @@ export class ArbitrageEngine {
     this.deps.store.tradesRejected += 1;
     const gross = topBid - topAsk;
     this.deps.store.addOpportunity({
-      id: nextId("opp"),
+      id: this.deps.ids.next("opp"),
       ts: now,
       buyExchange: buy,
       sellExchange: sell,
@@ -209,7 +215,7 @@ export class ArbitrageEngine {
       netProfitPct: 0,
       status,
       reason,
-      demo: this.deps.isDemo(),
+      demo: this.deps.policy.isDemo(),
     });
   }
 
@@ -236,7 +242,7 @@ export class ArbitrageEngine {
     const key = `${p.buy}->${p.sell}`;
     const gross = p.topBid - p.topAsk;
     const opportunity: Opportunity = {
-      id: nextId("opp"),
+      id: this.deps.ids.next("opp"),
       ts: p.now,
       buyExchange: p.buy,
       sellExchange: p.sell,
@@ -253,7 +259,7 @@ export class ArbitrageEngine {
       netProfitPct: p.netProfitPct,
       status: p.status,
       reason: p.reason,
-      demo: this.deps.isDemo(),
+      demo: this.deps.policy.isDemo(),
     };
 
     if (throttled) {
