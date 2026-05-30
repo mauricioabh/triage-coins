@@ -157,6 +157,14 @@ export interface PnlPoint {
   pnl: number;
 }
 
+/** Partial update body for PATCH /api/config. */
+export interface ConfigPatch {
+  minNetProfitPct?: number;
+  maxTradeBtc?: number;
+  flickerConfirmMs?: number;
+  activeExchanges?: Partial<Record<ExchangeId, boolean>>;
+}
+
 /** Engine config surfaced to the UI (no secrets). */
 export interface PublicConfig {
   minNetProfitPct: number;
@@ -164,6 +172,13 @@ export interface PublicConfig {
   staleMs: number;
   flickerConfirmMs: number;
   latencyMs: number;
+  activeExchanges: Record<ExchangeId, boolean>;
+  defaults: {
+    minNetProfitPct: number;
+    maxTradeBtc: number;
+    flickerConfirmMs: number;
+    activeExchanges: Record<ExchangeId, boolean>;
+  };
   takerFees: Record<ExchangeId, number>;
   withdrawalFeesBtc: Record<ExchangeId, number>;
 }

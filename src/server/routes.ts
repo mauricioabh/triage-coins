@@ -22,6 +22,19 @@ export function createRouter(app: App, sse: SseHub): Router {
     sse.handle(req, res);
   });
 
+  router.get("/config", (_req: Request, res: Response) => {
+    res.json({ success: true, data: app.getConfig() });
+  });
+
+  router.patch("/config", (req: Request, res: Response) => {
+    const error = app.patchConfig(req.body ?? {});
+    if (error) {
+      res.status(400).json({ success: false, error });
+      return;
+    }
+    res.json({ success: true, data: app.getConfig() });
+  });
+
   router.post("/control/pause", (_req: Request, res: Response) => {
     app.pause();
     res.json({ success: true });

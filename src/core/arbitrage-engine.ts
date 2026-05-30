@@ -155,7 +155,7 @@ export class ArbitrageEngine {
     // Anti-flicker: the edge must persist before we trust it.
     const firstTs = this.pending.get(key) ?? now;
     if (!this.pending.has(key)) this.pending.set(key, now);
-    if (now - firstTs < config.flickerConfirmMs) {
+    if (now - firstTs < runtime.flickerConfirmMs) {
       this.emit({ ...base, status: "pending_confirm", reason: "confirming edge persistence", partial }, true);
       return;
     }

@@ -8,6 +8,7 @@ import { PnlChart } from "./components/PnlChart";
 import { TradeLog } from "./components/TradeLog";
 import { Wallets } from "./components/Wallets";
 import { Controls } from "./components/Controls";
+import { ConfigPanel } from "./components/ConfigPanel";
 
 export function App(): JSX.Element {
   const [snapshot, setSnapshot] = useState<StateSnapshot | null>(null);
@@ -26,14 +27,9 @@ export function App(): JSX.Element {
           </h1>
           <p className="text-sm text-slate-500">Real-time cross-exchange BTC arbitrage engine · Kraken · Bybit · OKX</p>
         </div>
-        <a
-          href="https://github.com"
-          className="hidden text-xs text-slate-600 hover:text-slate-400 sm:block"
-          target="_blank"
-          rel="noreferrer"
-        >
+        <p className="hidden text-xs text-slate-600 sm:block">
           BTC/USDT · WebSocket feeds · inventory model
-        </a>
+        </p>
       </header>
 
       {!snapshot ? (
@@ -50,6 +46,7 @@ export function App(): JSX.Element {
             </div>
             <div className="space-y-5">
               <Controls stats={snapshot.stats} config={snapshot.config} />
+              <ConfigPanel config={snapshot.config} />
               <Wallets wallets={snapshot.wallets} rebalances={snapshot.rebalances} />
               <OpportunityFeed opportunities={snapshot.recentOpportunities} />
             </div>

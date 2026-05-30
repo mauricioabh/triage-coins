@@ -106,6 +106,13 @@ export interface PublicConfig {
   staleMs: number;
   flickerConfirmMs: number;
   latencyMs: number;
+  activeExchanges: Record<ExchangeId, boolean>;
+  defaults: {
+    minNetProfitPct: number;
+    maxTradeBtc: number;
+    flickerConfirmMs: number;
+    activeExchanges: Record<ExchangeId, boolean>;
+  };
   takerFees: Record<ExchangeId, number>;
   withdrawalFeesBtc: Record<ExchangeId, number>;
 }

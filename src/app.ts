@@ -1,7 +1,7 @@
 import { config } from "./config.js";
-import { runtime } from "./runtime.js";
+import { runtime, runtimeDefaults } from "./runtime.js";
 import { createLogger } from "./utils/logger.js";
-import { createConnectors, type ExchangeConnector } from "./exchanges/index.js";
+import { createConnector, type ExchangeConnector } from "./exchanges/index.js";
 import { OrderBookManager } from "./core/order-book-manager.js";
 import { WalletBook } from "./core/wallets.js";
 import { Store } from "./core/store.js";
@@ -11,9 +11,15 @@ import { ArbitrageEngine } from "./core/arbitrage-engine.js";
 import { Rebalancer } from "./core/rebalancer.js";
 import { SyntheticFeed } from "./demo/synthetic-feed.js";
 import { FeedRecorder } from "./demo/recorder.js";
-import type { OrderBook, PublicConfig, StateSnapshot } from "./types.js";
+import { EXCHANGE_IDS, type ConfigPatch, type ExchangeId, type OrderBook, type PublicConfig, type StateSnapshot } from "./types.js";
 
 const log = createLogger("app");
+
+const MIN_PROFIT_PCT = 0.0001;
+const MAX_PROFIT_PCT = 0.01;
+const MIN_TRADE_BTC = 0.01;
+const MAX_TRADE_BTC = 1.0;
+const MAX_FLICKER_MS = 500;
 
 /**
  * Wires the whole pipeline together and owns lifecycle: feed selection
@@ -30,7 +36,7 @@ export class App {
   private readonly rebalancer: Rebalancer;
   private readonly recorder = new FeedRecorder();
 
-  private connectors: ExchangeConnector[] = [];
+  private connectors = new Map<ExchangeId, ExchangeConnector>();
   private synthetic = new SyntheticFeed();
   private tickTimer: NodeJS.Timeout | null = null;
   private feedMode: "real" | "demo" | "stopped" = "stopped";
@@ -61,6 +67,7 @@ export class App {
   }
 
   private handleBook(book: OrderBook): void {
+    if (!runtime.activeExchanges[book.exchange]) return;
     this.recorder.record(book);
     this.engine.onBook(book);
   }
@@ -71,19 +78,42 @@ export class App {
       this.synthetic.start();
     } else {
       this.feedMode = "real";
-      this.connectors = createConnectors();
-      for (const c of this.connectors) {
-        c.onBook((book) => this.handleBook(book));
-        c.start();
+      for (const id of EXCHANGE_IDS) {
+        if (runtime.activeExchanges[id]) this.startConnector(id);
       }
     }
   }
 
   private stopFeed(): void {
     this.synthetic.stop();
-    for (const c of this.connectors) c.stop();
-    this.connectors = [];
+    for (const c of this.connectors.values()) c.stop();
+    this.connectors.clear();
     this.feedMode = "stopped";
+  }
+
+  private startConnector(id: ExchangeId): void {
+    if (this.connectors.has(id)) return;
+    const connector = createConnector(id);
+    connector.onBook((book) => this.handleBook(book));
+    connector.start();
+    this.connectors.set(id, connector);
+  }
+
+  private stopConnector(id: ExchangeId): void {
+    const connector = this.connectors.get(id);
+    if (!connector) return;
+    connector.stop();
+    this.connectors.delete(id);
+  }
+
+  private clearExchangeBook(exchange: ExchangeId): void {
+    this.obm.update({
+      exchange,
+      bids: [],
+      asks: [],
+      recvTs: 0,
+      exchangeTs: null,
+    });
   }
 
   setDemoMode(enabled: boolean): void {
@@ -107,6 +137,65 @@ export class App {
     if (Number.isFinite(btc) && btc > 0 && btc <= 10) runtime.maxTradeBtc = btc;
   }
 
+  /** Returns an error message on validation failure, otherwise null. */
+  patchConfig(patch: ConfigPatch): string | null {
+    if (patch.minNetProfitPct !== undefined) {
+      const pct = patch.minNetProfitPct;
+      if (!Number.isFinite(pct) || pct < MIN_PROFIT_PCT || pct > MAX_PROFIT_PCT) {
+        return `minNetProfitPct must be between ${MIN_PROFIT_PCT} and ${MAX_PROFIT_PCT}`;
+      }
+      runtime.minNetProfitPct = pct;
+    }
+
+    if (patch.maxTradeBtc !== undefined) {
+      const btc = patch.maxTradeBtc;
+      if (!Number.isFinite(btc) || btc < MIN_TRADE_BTC || btc > MAX_TRADE_BTC) {
+        return `maxTradeBtc must be between ${MIN_TRADE_BTC} and ${MAX_TRADE_BTC}`;
+      }
+      runtime.maxTradeBtc = btc;
+    }
+
+    if (patch.flickerConfirmMs !== undefined) {
+      const ms = patch.flickerConfirmMs;
+      if (!Number.isFinite(ms) || ms < 0 || ms > MAX_FLICKER_MS) {
+        return `flickerConfirmMs must be between 0 and ${MAX_FLICKER_MS}`;
+      }
+      runtime.flickerConfirmMs = ms;
+    }
+
+    if (patch.activeExchanges !== undefined) {
+      const next = { ...runtime.activeExchanges };
+      for (const id of EXCHANGE_IDS) {
+        const enabled = patch.activeExchanges[id];
+        if (enabled !== undefined) next[id] = enabled;
+      }
+      if (!EXCHANGE_IDS.some((id) => next[id])) {
+        return "at least one exchange must remain active";
+      }
+      for (const id of EXCHANGE_IDS) {
+        if (runtime.activeExchanges[id] === next[id]) continue;
+        runtime.activeExchanges[id] = next[id];
+        this.applyExchangeToggle(id, next[id]);
+      }
+    }
+
+    return null;
+  }
+
+  private applyExchangeToggle(id: ExchangeId, enabled: boolean): void {
+    log.info(`exchange ${id} ${enabled ? "enabled" : "disabled"}`);
+    if (runtime.demoMode) {
+      if (!enabled) this.clearExchangeBook(id);
+      return;
+    }
+    if (enabled) {
+      this.startConnector(id);
+    } else {
+      this.stopConnector(id);
+      this.clearExchangeBook(id);
+    }
+  }
+
   pause(): void {
     this.risk.pause();
   }
@@ -121,12 +210,8 @@ export class App {
     log.info("state and wallets reset");
   }
 
-  private btcRef(now: number): number {
-    const quotes = this.obm.bestQuotes(now);
-    for (const q of quotes) {
-      if (q.bid && q.ask) return (q.bid + q.ask) / 2;
-    }
-    return config.initialUsdt / config.initialBtc;
+  getConfig(): PublicConfig {
+    return this.publicConfig();
   }
 
   private publicConfig(): PublicConfig {
@@ -134,8 +219,15 @@ export class App {
       minNetProfitPct: runtime.minNetProfitPct,
       maxTradeBtc: runtime.maxTradeBtc,
       staleMs: config.staleMs,
-      flickerConfirmMs: config.flickerConfirmMs,
+      flickerConfirmMs: runtime.flickerConfirmMs,
       latencyMs: config.latencyMs,
+      activeExchanges: { ...runtime.activeExchanges },
+      defaults: {
+        minNetProfitPct: runtimeDefaults.minNetProfitPct,
+        maxTradeBtc: runtimeDefaults.maxTradeBtc,
+        flickerConfirmMs: runtimeDefaults.flickerConfirmMs,
+        activeExchanges: { ...runtimeDefaults.activeExchanges },
+      },
       takerFees: config.takerFees,
       withdrawalFeesBtc: config.withdrawalFeesBtc,
     };
