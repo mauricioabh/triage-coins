@@ -21,6 +21,23 @@ import { netProfit, netProfitPct, takerFeeCost } from "./pricing.js";
 const DUST_BTC = 1e-5;
 const REJECT_THROTTLE_MS = 800;
 
+/** Scored pair ready for execution — emitted and executed only if selected as best. */
+interface ExecutableCandidate {
+  buy: ExchangeId;
+  sell: ExchangeId;
+  topAsk: number;
+  topBid: number;
+  volume: number;
+  buyVwap: number;
+  sellVwap: number;
+  feeBuy: number;
+  feeSell: number;
+  netProfit: number;
+  netProfitPct: number;
+  partial: boolean;
+  now: number;
+}
+
 /** Collaborators are ports (interfaces), never concrete classes. */
 export interface EngineDeps {
   quotes: IQuoteBook;
@@ -56,15 +73,38 @@ export class ArbitrageEngine {
   }
 
   private evaluate(now: number): void {
+    const executables: ExecutableCandidate[] = [];
     for (const buy of EXCHANGE_IDS) {
       for (const sell of EXCHANGE_IDS) {
         if (buy === sell) continue;
-        this.evaluatePair(buy, sell, now);
+        const candidate = this.scorePair(buy, sell, now);
+        if (candidate) executables.push(candidate);
       }
     }
+    if (executables.length === 0) return;
+
+    const best = executables.reduce((a, b) => (this.compareCandidates(a, b) < 0 ? b : a));
+    const key = `${best.buy}->${best.sell}`;
+    const status: OpportunityStatus = best.partial ? "executed_partial" : "executed";
+    const opportunity = this.emit(
+      { ...best, status, reason: "executed" },
+      false,
+    );
+    this.deps.opportunityExecutor.execute(opportunity, now);
+    this.pending.delete(key);
+    this.lastEmit.set(key, now);
   }
 
-  private evaluatePair(buy: ExchangeId, sell: ExchangeId, now: number): void {
+  /** Higher netProfit wins; tie-break netProfitPct, then lexicographic (buy, sell). */
+  private compareCandidates(a: ExecutableCandidate, b: ExecutableCandidate): number {
+    if (a.netProfit !== b.netProfit) return a.netProfit - b.netProfit;
+    if (a.netProfitPct !== b.netProfitPct) return a.netProfitPct - b.netProfitPct;
+    if (a.buy !== b.buy) return a.buy < b.buy ? -1 : 1;
+    return a.sell < b.sell ? -1 : a.sell === b.sell ? 0 : 1;
+  }
+
+  /** Score one pair; emit rejections and pending_confirm inline; return executable if confirmed. */
+  private scorePair(buy: ExchangeId, sell: ExchangeId, now: number): ExecutableCandidate | null {
     const key = `${buy}->${sell}`;
     const buyBook = this.deps.quotes.getBook(buy);
     const sellBook = this.deps.quotes.getBook(sell);
@@ -73,18 +113,18 @@ export class ArbitrageEngine {
 
     if (!buyBook || !sellBook || !topAsk || !topBid) {
       this.pending.delete(key);
-      return;
+      return null;
     }
 
     if (topAsk.price >= topBid.price) {
       this.pending.delete(key);
-      return;
+      return null;
     }
 
     if (!this.deps.quotes.isFresh(buy, now) || !this.deps.quotes.isFresh(sell, now)) {
       this.emitRejection(buy, sell, topAsk.price, topBid.price, "rejected_stale", "stale quote", now);
       this.pending.delete(key);
-      return;
+      return null;
     }
 
     const feeBuyRate = this.deps.policy.takerFee(buy);
@@ -100,7 +140,7 @@ export class ArbitrageEngine {
     if (target < DUST_BTC) {
       this.emitRejection(buy, sell, topAsk.price, topBid.price, "rejected_liquidity", "no liquidity or inventory", now);
       this.pending.delete(key);
-      return;
+      return null;
     }
 
     const buySide = walkBook(buyBook.asks, target);
@@ -109,7 +149,7 @@ export class ArbitrageEngine {
     if (volume < DUST_BTC) {
       this.emitRejection(buy, sell, topAsk.price, topBid.price, "rejected_liquidity", "insufficient depth", now);
       this.pending.delete(key);
-      return;
+      return null;
     }
 
     const buyVwap = buySide.vwap;
@@ -139,27 +179,23 @@ export class ArbitrageEngine {
     if (netPct <= this.deps.policy.minNetProfitPct()) {
       this.emitRejection(buy, sell, topAsk.price, topBid.price, "rejected_fees", "net edge below threshold", now);
       this.pending.delete(key);
-      return;
+      return null;
     }
 
     const firstTs = this.pending.get(key) ?? now;
     if (!this.pending.has(key)) this.pending.set(key, now);
     if (now - firstTs < this.deps.policy.flickerConfirmMs()) {
       this.emit({ ...base, status: "pending_confirm", reason: "confirming edge persistence", partial }, true);
-      return;
+      return null;
     }
 
     if (!this.deps.risk.canExecute()) {
       this.emitRejection(buy, sell, topAsk.price, topBid.price, "rejected_risk", "circuit breaker active", now);
       this.pending.delete(key);
-      return;
+      return null;
     }
 
-    const status: OpportunityStatus = partial ? "executed_partial" : "executed";
-    const opportunity = this.emit({ ...base, status, reason: "executed", partial }, false);
-    this.deps.opportunityExecutor.execute(opportunity, now);
-    this.pending.delete(key);
-    this.lastEmit.set(key, now);
+    return { ...base, partial };
   }
 
   private emitRejection(
