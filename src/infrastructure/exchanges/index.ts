@@ -4,6 +4,7 @@ import { ExchangeConnector } from "./base.js";
 import { KrakenConnector } from "./kraken.js";
 import { BybitConnector } from "./bybit.js";
 import { OkxConnector } from "./okx.js";
+import { BinanceConnector } from "./binance.js";
 
 export function createConnector(id: ExchangeId): ExchangeConnector {
   switch (id) {
@@ -13,6 +14,8 @@ export function createConnector(id: ExchangeId): ExchangeConnector {
       return new BybitConnector();
     case "okx":
       return new OkxConnector();
+    case "binance":
+      return new BinanceConnector();
     default: {
       const _exhaustive: never = id;
       throw new Error(`unknown exchange: ${_exhaustive}`);
@@ -21,7 +24,7 @@ export function createConnector(id: ExchangeId): ExchangeConnector {
 }
 
 export function createConnectors(): ExchangeConnector[] {
-  return [createConnector("kraken"), createConnector("bybit"), createConnector("okx")];
+  return [createConnector("kraken"), createConnector("bybit"), createConnector("okx"), createConnector("binance")];
 }
 
 /** Real-feed factory: builds a live WS connector per exchange. */

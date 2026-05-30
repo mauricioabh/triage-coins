@@ -3,7 +3,7 @@
  *
  * Triage Coins is a **simulated** cross-exchange BTC/USDT arbitrage system.
  * No real funds are at risk — all trades are paper-executed against live order
- * book data from Kraken, Bybit and OKX (or a synthetic feed in demo mode).
+ * book data from Kraken, Bybit, OKX and Binance (or a synthetic feed in demo mode).
  */
 
 import type { OpenAPIV3 } from "openapi-types";
@@ -15,8 +15,8 @@ import type { OpenAPIV3 } from "openapi-types";
 const schemas: Record<string, OpenAPIV3.SchemaObject> = {
   ExchangeId: {
     type: "string",
-    enum: ["kraken", "bybit", "okx"],
-    description: "One of the three supported exchanges.",
+    enum: ["kraken", "bybit", "okx", "binance"],
+    description: "One of the supported exchanges.",
   },
 
   FeedStatus: {
@@ -266,7 +266,7 @@ const schemas: Record<string, OpenAPIV3.SchemaObject> = {
       takerFees: {
         type: "object",
         additionalProperties: { type: "number" },
-        description: "Taker fee rates per exchange (e.g. kraken: 0.0026, bybit: 0.001, okx: 0.001).",
+        description: "Taker fee rates per exchange (e.g. kraken: 0.0026, bybit: 0.001, okx: 0.001, binance: 0.001).",
       },
       withdrawalFeesBtc: {
         type: "object",
@@ -469,7 +469,7 @@ export const openapiSpec: OpenAPIV3.Document = {
     version: "1.0.0",
     description: `
 **Triage Coins** is a real-time BTC/USDT arbitrage detection and simulation engine
-that monitors live order books from **Kraken**, **Bybit** and **OKX** simultaneously.
+that monitors live order books from **Kraken**, **Bybit**, **OKX** and **Binance** simultaneously.
 
 > ⚠️ **Simulated only** — no real funds are ever committed. All trades are paper-executed
 > against live (or synthetic demo) market data. The system uses a *pre-positioned inventory
@@ -524,7 +524,7 @@ that monitors live order books from **Kraken**, **Bybit** and **OKX** simultaneo
         tags: ["Monitoring"],
         summary: "Full state snapshot",
         description:
-          "Returns the complete in-memory engine state as a single JSON document: live quotes from all three exchanges, simulated wallet balances, engine statistics, the last N detected opportunities and executed trades, rebalance history, the cumulative P&L time-series, and the current engine configuration.",
+          "Returns the complete in-memory engine state as a single JSON document: live quotes from all active exchanges, simulated wallet balances, engine statistics, the last N detected opportunities and executed trades, rebalance history, the cumulative P&L time-series, and the current engine configuration.",
         operationId: "getState",
         responses: {
           "200": successResponse("Current engine state.", { $ref: "#/components/schemas/StateSnapshot" }),

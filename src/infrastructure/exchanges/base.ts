@@ -24,7 +24,7 @@ export abstract class ExchangeConnector implements MarketDataFeed {
   private listeners: BookListener[] = [];
   private reconnectAttempts = 0;
   private pingTimer: NodeJS.Timeout | null = null;
-  private closed = false;
+  protected closed = false;
   private lastEmitTs = 0;
 
   constructor() {
@@ -48,7 +48,7 @@ export abstract class ExchangeConnector implements MarketDataFeed {
     this.ws = null;
   }
 
-  private connect(): void {
+  protected connect(): void {
     this.log.info(`connecting to ${this.url}`);
     const ws = new WebSocket(this.url);
     this.ws = ws;
@@ -56,13 +56,16 @@ export abstract class ExchangeConnector implements MarketDataFeed {
     ws.on("open", () => {
       this.reconnectAttempts = 0;
       this.book.reset();
-      this.log.info("connected, subscribing");
-      try {
-        ws.send(JSON.stringify(this.subscribeMessage()));
-      } catch (err) {
-        this.log.error("subscribe send failed", err);
+      this.log.info(this.skipSubscribe() ? "connected" : "connected, subscribing");
+      if (!this.skipSubscribe()) {
+        try {
+          ws.send(JSON.stringify(this.subscribeMessage()));
+        } catch (err) {
+          this.log.error("subscribe send failed", err);
+        }
       }
       this.startPing();
+      this.onConnected();
     });
 
     ws.on("message", (data: WebSocket.RawData) => {
@@ -82,6 +85,7 @@ export abstract class ExchangeConnector implements MarketDataFeed {
 
     ws.on("close", () => {
       this.clearPing();
+      this.onDisconnected();
       if (this.closed) return;
       this.scheduleReconnect();
     });
@@ -140,6 +144,17 @@ export abstract class ExchangeConnector implements MarketDataFeed {
     if (book.bids.length === 0 || book.asks.length === 0) return;
     for (const listener of this.listeners) listener(book);
   }
+
+  /** Combined-stream URLs (e.g. Binance) set this to skip the subscribe send. */
+  protected skipSubscribe(): boolean {
+    return false;
+  }
+
+  /** Hook after the WebSocket opens and optional subscribe is sent. */
+  protected onConnected(): void {}
+
+  /** Hook when the WebSocket closes (before reconnect scheduling). */
+  protected onDisconnected(): void {}
 
   /** Exchange-specific subscribe payload (sent on open). */
   protected abstract subscribeMessage(): unknown;

@@ -74,6 +74,8 @@ export class SyntheticFeed implements MarketDataFeed {
     const pairs: [ExchangeId, ExchangeId][] = [
       ["bybit", "okx"],
       ["okx", "bybit"],
+      ["binance", "bybit"],
+      ["bybit", "binance"],
       ["okx", "kraken"],
       ["bybit", "kraken"],
     ];
@@ -82,7 +84,8 @@ export class SyntheticFeed implements MarketDataFeed {
 
   private buildBook(exchange: ExchangeId, now: number): OrderBook {
     // Per-exchange persistent micro-offset so books aren't identical.
-    const offset = exchange === "kraken" ? 8 : exchange === "bybit" ? -4 : 2;
+    const offset =
+      exchange === "kraken" ? 8 : exchange === "bybit" ? -4 : exchange === "binance" ? 0 : 2;
     let mid = this.mid + offset + (Math.random() - 0.5) * 6;
 
     const active = now < this.injectUntil;

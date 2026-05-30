@@ -12,6 +12,7 @@ const EXCHANGES: { id: ExchangeId; label: string }[] = [
   { id: "kraken", label: "Kraken" },
   { id: "bybit", label: "Bybit" },
   { id: "okx", label: "OKX" },
+  { id: "binance", label: "Binance" },
 ];
 
 const MIN_PROFIT = 0.0001;

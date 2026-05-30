@@ -25,7 +25,7 @@ export function App(): JSX.Element {
           <h1 className="font-display text-2xl font-extrabold tracking-tight text-slate-100">
             Triage<span className="text-accent">Coins</span>
           </h1>
-          <p className="text-sm text-slate-500">Real-time cross-exchange BTC arbitrage engine · Kraken · Bybit · OKX</p>
+          <p className="text-sm text-slate-500">Real-time cross-exchange BTC arbitrage engine · Kraken · Bybit · OKX · Binance</p>
         </div>
         <p className="hidden text-xs text-slate-600 sm:block">
           BTC/USDT · WebSocket feeds · inventory model

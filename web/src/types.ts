@@ -1,6 +1,6 @@
 // Mirror of the backend StateSnapshot contract (see src/types.ts).
 
-export type ExchangeId = "kraken" | "bybit" | "okx";
+export type ExchangeId = "kraken" | "bybit" | "okx" | "binance";
 export type FeedStatus = "connecting" | "live" | "stale" | "down";
 export type CircuitState = "running" | "paused" | "tripped";
 
