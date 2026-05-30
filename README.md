@@ -99,7 +99,7 @@ API REST + SSE ──► Dashboard React
 
 **SSE para el dashboard** — el flujo servidor→cliente es unidireccional; SSE reconecta sobre HTTP sin un segundo WebSocket hacia el navegador.
 
-**Monolito en Railway** — el motor necesita conexiones WS persistentes y estado en memoria continuo; no encaja en serverless efímero. Un proceso Node sirve `/api`, `/api/stream` y los estáticos de `web/dist`.
+**Monolito en Fly.io** — el motor necesita conexiones WS persistentes y estado en memoria continuo; no encaja en serverless efímero. Un proceso Node sirve `/api`, `/api/stream` y los estáticos de `web/dist`.
 
 El dominio (`src/domain/`) no importa infraestructura ni HTTP; los casos de uso en `application/` orquestan; `composition/bootstrap.ts` cablea adaptadores concretos.
 
@@ -114,7 +114,7 @@ El dominio (`src/domain/`) no importa infraestructura ni HTTP; los casos de uso 
 | Feeds       | WebSocket nativo (`ws`) — APIs públicas         |
 | Frontend    | React 18, Vite, Tailwind CSS v3                 |
 | Estado      | In-memory (sin base de datos)                   |
-| Deploy      | [Railway](https://railway.app) — Nixpacks vía `railway.json` |
+| Deploy      | [Fly.io](https://fly.io) — Docker multi-stage (`Dockerfile` + `fly.toml`) |
 
 No se requieren API keys: los feeds de mercado son públicos.
 
@@ -146,7 +146,8 @@ src/
   test-support/               fakes + FakeMarketDataFeed (tests)
 web/
   src/                  Dashboard (StatsBar, PriceMatrix, PnL, TradeLog, Wallets, Controls)
-railway.json            Build/start/healthcheck para Railway
+Dockerfile              Imagen Node 20 (build Vite + tsx en prod)
+fly.toml                Región, env vars y healthcheck Fly.io
 .env.example            Variables documentadas (sin secretos)
 ```
 
@@ -214,7 +215,7 @@ npm test             # Tests unitarios (node:test), p. ej. VWAP/profit
 npm run build        # Frontend Vite → web/dist
 ```
 
-Los PRs hacia `dev` o `main` deben pasar **GitHub Actions** (`CI / quality`: typecheck, test, build) — el mismo gate que el comando local `/ship` y el deploy en Railway.
+Los PRs hacia `dev` o `main` deben pasar **GitHub Actions** (`CI / quality`: typecheck, test, build) — el mismo gate que el comando local `/ship` y el deploy en Fly.io.
 
 Antes de desplegar conviene pasar los tres en local: `typecheck`, `test` y `build`.
 
@@ -250,7 +251,7 @@ Respuestas REST siguen la forma `{ success, data?, error? }`.
 
 | Método | Ruta | Descripción |
 |--------|------|-------------|
-| `GET` | `/api/health` | Healthcheck (Railway) |
+| `GET` | `/api/health` | Healthcheck (Fly.io) |
 | `GET` | `/api/state` | Snapshot completo del estado |
 | `GET` | `/api/stream` | **SSE** — snapshots en tiempo real |
 | `POST` | `/api/control/pause` | Pausar motor |
@@ -262,20 +263,18 @@ Respuestas REST siguen la forma `{ success, data?, error? }`.
 
 ---
 
-## Deploy en Railway
+## Deploy en Fly.io
 
-El repo incluye `railway.json` con Nixpacks (no hace falta Dockerfile).
+El repo incluye `Dockerfile` (multi-stage: build Vite + runtime Node) y `fly.toml`.
 
-1. Crea un proyecto en [Railway](https://railway.app) conectado a este repositorio.
-2. Elige región **EU (Frankfurt o Amsterdam)** — algunos exchanges bloquean o degradan conexiones desde IPs de datacenter en US.
-3. Railway ejecutará:
-   - **Build:** `npm run build` (instala y compila el frontend)
-   - **Start:** `npm start`
-   - **Healthcheck:** `GET /api/health`
-4. Variables de entorno: opcionales; los defaults permiten arrancar sin configurar nada.
-5. Abre la URL pública: badge **LIVE**, cuatro venues en la price matrix, y —en mercado real— sobre todo oportunidades rechazadas por fees (esperado).
+1. Instala [flyctl](https://fly.io/docs/flyctl/install/) e inicia sesión: `fly auth login`.
+2. Desde la raíz del repo: `fly launch` (primera vez) o `fly deploy`.
+3. **Región primaria:** `sin` (Singapore) — menor latencia a matching engines de Binance, Bybit y OKX.
+4. Fly expone el servicio en el puerto interno **8080** con healthcheck `GET /api/health`.
+5. Variables de entorno: opcionales; `fly.toml` incluye defaults razonables (`STALE_MS`, inventario inicial, etc.).
+6. Abre la URL pública: badge **LIVE**, cuatro venues en la price matrix, y —en mercado real— sobre todo oportunidades rechazadas por fees (esperado).
 
-Para una demo con actividad visible en pocos segundos, define `DEMO_MODE=true` en Railway o actívalo desde Controls.
+Para una demo con actividad visible en pocos segundos, define `DEMO_MODE=true` en Fly (`fly secrets set` / `[env]` en `fly.toml`) o actívalo desde Controls.
 
 ---
 

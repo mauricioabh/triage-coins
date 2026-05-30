@@ -489,7 +489,7 @@ that monitors live order books from **Kraken**, **Bybit**, **OKX** and **Binance
     license: { name: "MIT" },
   },
   servers: [
-    { url: "/", description: "Current host (Railway / local)" },
+    { url: "/", description: "Current host (Fly.io / local)" },
   ],
   tags: [
     { name: "Monitoring", description: "Health and state inspection." },
@@ -503,7 +503,7 @@ that monitors live order books from **Kraken**, **Bybit**, **OKX** and **Binance
         tags: ["Monitoring"],
         summary: "Health check",
         description:
-          "Lightweight endpoint used by Railway (and any uptime monitor) to verify the server is alive. Always returns HTTP 200 while the process is running.",
+          "Lightweight endpoint used by Fly.io (and any uptime monitor) to verify the server is alive. Always returns HTTP 200 while the process is running.",
         operationId: "getHealth",
         responses: {
           "200": successResponse("Server is healthy.", {
