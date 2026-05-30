@@ -1,5 +1,7 @@
 # Triage Coins
 
+[![CI](https://github.com/mauricioabh/triage-coins/actions/workflows/ci.yml/badge.svg?branch=dev)](https://github.com/mauricioabh/triage-coins/actions/workflows/ci.yml)
+
 **Detección y simulación de arbitraje de Bitcoin en tiempo real** entre Kraken, Bybit y OKX.
 
 El proyecto escucha los libros de órdenes por WebSocket, calcula si una oportunidad cross-exchange sigue siendo rentable **después de fees y slippage real**, y simula la ejecución con inventario pre-posicionado, gestión de riesgo y un dashboard en vivo. No mueve fondos reales: es un motor de análisis y simulación pensado para ser honesto con mercados eficientes y transparente cuando se usa feed sintético.
@@ -207,9 +209,12 @@ Abre la URL y confirma el badge **Demo / Simulated Feed**. Desde el panel Contro
 ```bash
 npm run typecheck    # TypeScript backend + frontend
 npm test             # Tests unitarios (node:test), p. ej. VWAP/profit
+npm run build        # Frontend Vite → web/dist
 ```
 
-Antes de desplegar conviene pasar los tres: `typecheck`, `test` y `build`.
+Los PRs hacia `dev` o `main` deben pasar **GitHub Actions** (`CI / quality`: typecheck, test, build) — el mismo gate que el comando local `/ship` y el deploy en Railway.
+
+Antes de desplegar conviene pasar los tres en local: `typecheck`, `test` y `build`.
 
 ---
 
