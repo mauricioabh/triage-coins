@@ -60,6 +60,7 @@ Consecuencia esperada en feed **real**: la mayoría de divergencias brutas salen
 
 ### Robustez en el hot path
 
+- **One trade per tick** — si varios pares confirman en el mismo tick, solo se ejecuta el de mayor `netProfit` (desempate por `netProfitPct` y par lexicográfico).
 - **Staleness** — quotes más viejos que `STALE_MS` no disparan ejecución.
 - **Anti-flicker** — la divergencia debe persistir `FLICKER_CONFIRM_MS` antes de actuar (filtra artefactos de latencia).
 - **Partial fills** — volumen limitado por profundidad del libro e inventario de wallet.

@@ -112,3 +112,82 @@ test("counts ticks processed", () => {
   trigger(h);
   assert.equal(h.store.ticksProcessed, 1);
 });
+
+test("executes only the highest netProfit opportunity when multiple pairs confirm in one tick", () => {
+  const quotes = new FakeQuoteBook();
+  const store = new FakeStore();
+  const risk = new FakeRiskGate(true);
+  const executor = new FakeExecutor(1);
+  const policy = new FakePolicy();
+  policy.maxTrade = 0.1;
+  policy.flickerMs = 0;
+
+  const recvTs = NOW;
+  // Small edge: buy bybit, sell okx
+  quotes.update(book("bybit", [{ price: 99990, qty: 1 }], [{ price: 100000, qty: 1 }], recvTs));
+  quotes.update(book("okx", [{ price: 100600, qty: 1 }], [{ price: 100610, qty: 1 }], recvTs));
+  // Large edge: buy kraken (cheaper ask), sell bybit
+  quotes.update(book("kraken", [{ price: 99400, qty: 1 }], [{ price: 99500, qty: 1 }], recvTs));
+  quotes.update(book("bybit", [{ price: 101500, qty: 1 }], [{ price: 101510, qty: 1 }], recvTs));
+
+  const opportunityExecutor = new ExecuteArbitrage(executor, store, risk);
+  const engine = new ArbitrageEngine({
+    quotes,
+    inventory: new FakeInventory(),
+    store,
+    risk,
+    opportunityExecutor,
+    policy,
+    clock: new FixedClock(NOW),
+    ids: new SeqIds(),
+  });
+
+  engine.onBook(quotes.getBook("kraken")!);
+
+  assert.equal(executor.calls.length, 1);
+  assert.equal(executor.calls[0]!.op.buyExchange, "kraken");
+  assert.equal(executor.calls[0]!.op.sellExchange, "bybit");
+  assert.equal(statusesFor({ engine, quotes, store, risk, executor, policy }, "bybit", "okx").length, 0);
+  assert.equal(store.trades.length, 1);
+});
+
+test("defers lower-profit pair to a later tick after the winner executes", () => {
+  const quotes = new FakeQuoteBook();
+  const store = new FakeStore();
+  const risk = new FakeRiskGate(true);
+  const executor = new FakeExecutor(1);
+  const policy = new FakePolicy();
+  policy.maxTrade = 0.1;
+  policy.flickerMs = 0;
+
+  const recvTs = NOW;
+  quotes.update(book("okx", [{ price: 100600, qty: 1 }], [{ price: 100610, qty: 1 }], recvTs));
+  quotes.update(book("kraken", [{ price: 99400, qty: 1 }], [{ price: 99500, qty: 1 }], recvTs));
+  quotes.update(book("bybit", [{ price: 101500, qty: 1 }], [{ price: 101510, qty: 1 }], recvTs));
+
+  const clock = new FixedClock(NOW);
+  const opportunityExecutor = new ExecuteArbitrage(executor, store, risk);
+  const engine = new ArbitrageEngine({
+    quotes,
+    inventory: new FakeInventory(),
+    store,
+    risk,
+    opportunityExecutor,
+    policy,
+    clock,
+    ids: new SeqIds(),
+  });
+
+  engine.onBook(quotes.getBook("kraken")!);
+  assert.equal(executor.calls.length, 1);
+
+  // Remove other crosses; bybit→okx should execute (anti-flicker already confirmed).
+  quotes.update(book("kraken", [{ price: 99400, qty: 1 }], [{ price: 101600, qty: 1 }], recvTs));
+  quotes.update(book("bybit", [{ price: 99990, qty: 1 }], [{ price: 100000, qty: 1 }], recvTs));
+  clock.t = NOW + 100;
+  engine.onBook(quotes.getBook("okx")!);
+
+  assert.equal(executor.calls.length, 2);
+  assert.equal(executor.calls[1]!.op.buyExchange, "bybit");
+  assert.equal(executor.calls[1]!.op.sellExchange, "okx");
+});
