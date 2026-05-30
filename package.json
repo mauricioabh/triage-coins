@@ -12,7 +12,7 @@
     "start": "tsx src/index.ts",
     "build": "npm --prefix web install && npm --prefix web run build",
     "typecheck": "tsc --noEmit && npm --prefix web run typecheck",
-    "test": "tsx --test src/**/*.test.ts"
+    "test": "node --import tsx --test src/**/*.test.ts"
   },
   "dependencies": {
     "express": "^4.21.2",
