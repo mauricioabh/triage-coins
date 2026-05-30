@@ -1,0 +1,41 @@
+# fly.toml — https://fly.io/docs/reference/configuration/
+
+app = 'triage-coins'
+primary_region = 'sin'
+
+[build]
+
+[env]
+  PORT = '8080'
+  MIN_NET_PROFIT_PCT = '0.0005'
+  MAX_TRADE_BTC = '0.25'
+  STALE_MS = '3000'
+  FLICKER_CONFIRM_MS = '150'
+  LATENCY_MS = '120'
+  LATENCY_SLIPPAGE_BPS = '2'
+  CIRCUIT_BREAKER_LOSSES = '5'
+  CIRCUIT_BREAKER_COOLDOWN_MS = '15000'
+  INITIAL_USDT = '50000'
+  INITIAL_BTC = '0.5'
+  DEMO_MODE = 'false'
+  RECORD_FEED = 'false'
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = 'off'
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ['app']
+
+  [[http_service.checks]]
+    interval = '30s'
+    timeout = '5s'
+    grace_period = '10s'
+    method = 'GET'
+    path = '/api/health'
+
+[[vm]]
+  memory = '512mb'
+  cpu_kind = 'shared'
+  cpus = 1
