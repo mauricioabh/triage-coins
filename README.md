@@ -40,7 +40,7 @@ Comparar `BTC/USDT` con `BTC/USD` mezcla basis de stablecoin y genera “arbitra
 
 ### Slippage con VWAP, no un porcentaje fijo
 
-El volumen objetivo recorre el libro bid/ask nivel a nivel (`src/utils/vwap.ts`). El profit neto usa los VWAP de compra y venta; el slippage ya está dentro de esos precios:
+El volumen objetivo recorre el libro bid/ask nivel a nivel (`src/domain/services/vwap.ts`). El profit neto usa los VWAP de compra y venta; el slippage ya está dentro de esos precios:
 
 ```
 profit = sellVwap × vol × (1 − feeSell) − buyVwap × vol × (1 + feeBuy)
@@ -97,7 +97,7 @@ API REST + SSE ──► Dashboard React
 
 **Monolito en Railway** — el motor necesita conexiones WS persistentes y estado en memoria continuo; no encaja en serverless efímero. Un proceso Node sirve `/api`, `/api/stream` y los estáticos de `web/dist`.
 
-Cada pieza en `src/core/` está desacoplada y es testeable por separado.
+El dominio (`src/domain/`) no importa infraestructura ni HTTP; los casos de uso en `application/` orquestan; `composition/bootstrap.ts` cablea adaptadores concretos.
 
 ---
 
@@ -120,16 +120,26 @@ No se requieren API keys: los feeds de mercado son públicos.
 
 ```
 src/
-  index.ts              Entrypoint Express (API + SSE + estáticos)
-  app.ts                Orquestador: feeds, ticks, snapshot, controles
-  config.ts             Fees, capital, umbrales (env + defaults)
-  runtime.ts            Flags mutables en runtime (demo, umbral, max trade)
-  types.ts              Tipos de dominio
-  exchanges/            Conectores WS (Kraken, Bybit, OKX) + LocalBook
-  core/                 Motor: books, arbitraje, riesgo, ejecución, wallets, store
-  demo/                 Feed sintético + recorder NDJSON
-  server/               routes.ts, sse.ts
-  utils/                vwap.ts, logger, ids (+ tests)
+  index.ts                    Express + bootstrap + estáticos web/dist
+  composition/                bootstrap.ts, application-service.ts (wiring)
+  domain/
+    entities/                 OrderBook, Opportunity, Trade, Wallet, …
+    ports/                    MarketDataFeed, IQuoteBook, TradingPolicy, …
+    services/                 vwap, pricing, ArbitrageEngine
+  application/
+    use-cases/                ProcessOrderBookUpdate, ExecuteArbitrage, …
+  infrastructure/
+    exchanges/                WS Kraken / Bybit / OKX
+    demo/                     SyntheticFeed, FeedRecorder (NDJSON)
+    state/                    Store, WalletBook, OrderBookManager
+    config/                   config.ts, runtime.ts (único lector de env)
+    simulation/               ExecutionSimulator, RiskManager
+    rebalancing/              Rebalancer
+    logging/                  logger
+  interfaces/
+    http/                     REST → ApplicationService
+    sse/                      SSE hub
+  test-support/               fakes + FakeMarketDataFeed (tests)
 web/
   src/                  Dashboard (StatsBar, PriceMatrix, PnL, TradeLog, Wallets, Controls)
 railway.json            Build/start/healthcheck para Railway
