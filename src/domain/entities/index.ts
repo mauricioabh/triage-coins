@@ -4,9 +4,9 @@
  * no USD/USDT basis distortion).
  */
 
-export type ExchangeId = "kraken" | "bybit" | "okx";
+export type ExchangeId = "kraken" | "bybit" | "okx" | "binance";
 
-export const EXCHANGE_IDS: ExchangeId[] = ["kraken", "bybit", "okx"];
+export const EXCHANGE_IDS: ExchangeId[] = ["kraken", "bybit", "okx", "binance"];
 
 /** A single order book price level. */
 export interface Level {

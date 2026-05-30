@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/mauricioabh/triage-coins/actions/workflows/ci.yml/badge.svg?branch=dev)](https://github.com/mauricioabh/triage-coins/actions/workflows/ci.yml)
 
-**Detección y simulación de arbitraje de Bitcoin en tiempo real** entre Kraken, Bybit y OKX.
+**Detección y simulación de arbitraje de Bitcoin en tiempo real** entre Kraken, Bybit, OKX y Binance.
 
 El proyecto escucha los libros de órdenes por WebSocket, calcula si una oportunidad cross-exchange sigue siendo rentable **después de fees y slippage real**, y simula la ejecución con inventario pre-posicionado, gestión de riesgo y un dashboard en vivo. No mueve fondos reales: es un motor de análisis y simulación pensado para ser honesto con mercados eficientes y transparente cuando se usa feed sintético.
 
@@ -12,7 +12,7 @@ Todo corre en un **monolito Node.js + TypeScript**: la API REST, el stream SSE y
 
 ## Qué hace (en una frase)
 
-Compara precios de **BTC/USDT** en tres exchanges, camina el order book con VWAP, descarta oportunidades que no pagan taker fees, y —si pasan riesgo y anti-flicker— simula compra y venta en paralelo actualizando wallets virtuales por venue.
+Compara precios de **BTC/USDT** en cuatro exchanges, camina el order book con VWAP, descarta oportunidades que no pagan taker fees, y —si pasan riesgo y anti-flicker— simula compra y venta en paralelo actualizando wallets virtuales por venue.
 
 ---
 
@@ -38,7 +38,7 @@ El inventario deriva con el tiempo. Un **Rebalancer** corrige desbalances cuando
 
 ### Mismo par en todos lados: BTC/USDT
 
-Comparar `BTC/USDT` con `BTC/USD` mezcla basis de stablecoin y genera “arbitrajes” que no son ejecutables de forma consistente. Aquí los tres conectores normalizan **BTC/USDT**.
+Comparar `BTC/USDT` con `BTC/USD` mezcla basis de stablecoin y genera “arbitrajes” que no son ejecutables de forma consistente. Aquí los conectores normalizan **BTC/USDT**.
 
 ### Slippage con VWAP, no un porcentaje fijo
 
@@ -55,6 +55,7 @@ profit = sellVwap × vol × (1 − feeSell) − buyVwap × vol × (1 + feeBuy)
 | Kraken   | 0,26 %         |
 | Bybit    | 0,10 %         |
 | OKX      | 0,10 %         |
+| Binance  | 0,10 %         |
 
 Consecuencia esperada en feed **real**: la mayoría de divergencias brutas salen **rejected · fees** en el log. Eso es comportamiento correcto, no un bug.
 
@@ -78,7 +79,7 @@ Opcionalmente, `RECORD_FEED=true` graba ticks en `data/*.ndjson` (ignorados por 
 ## Arquitectura
 
 ```
-Exchanges (WS: Kraken v2, Bybit v5, OKX v5)
+Exchanges (WS: Kraken v2, Bybit v5, OKX v5, Binance depth10@100ms + REST fallback)
    │  libros normalizados (snapshot + deltas, staleness)
    ▼
 OrderBookManager ── mejor bid/ask y frescura por venue
@@ -132,7 +133,7 @@ src/
   application/
     use-cases/                ProcessOrderBookUpdate, ExecuteArbitrage, …
   infrastructure/
-    exchanges/                WS Kraken / Bybit / OKX
+    exchanges/                WS Kraken / Bybit / OKX / Binance
     demo/                     SyntheticFeed, FeedRecorder (NDJSON)
     state/                    Store, WalletBook, OrderBookManager
     config/                   config.ts, runtime.ts (único lector de env)
@@ -272,7 +273,7 @@ El repo incluye `railway.json` con Nixpacks (no hace falta Dockerfile).
    - **Start:** `npm start`
    - **Healthcheck:** `GET /api/health`
 4. Variables de entorno: opcionales; los defaults permiten arrancar sin configurar nada.
-5. Abre la URL pública: badge **LIVE**, tres venues en la price matrix, y —en mercado real— sobre todo oportunidades rechazadas por fees (esperado).
+5. Abre la URL pública: badge **LIVE**, cuatro venues en la price matrix, y —en mercado real— sobre todo oportunidades rechazadas por fees (esperado).
 
 Para una demo con actividad visible en pocos segundos, define `DEMO_MODE=true` en Railway o actívalo desde Controls.
 
@@ -280,7 +281,7 @@ Para una demo con actividad visible en pocos segundos, define `DEMO_MODE=true` e
 
 ## Qué esperar en producción con feed real
 
-- Conexión estable a los tres WebSockets.
+- Conexión estable a los cuatro feeds (Binance usa REST polling si el WS cae).
 - Motor procesando ticks en sub-milisegundo medio (visible como **Engine /tick**).
 - Pocas o ninguna ejecución rentable en neto; muchos eventos `rejected · fees`.
 - Wallets y rebalanceos reflejando el modelo de inventario, no transferencias por trade.
@@ -291,7 +292,6 @@ Eso no indica que el bot “no funcione”: indica que el filtro económico es e
 
 ## Roadmap
 
-- Más exchanges (nuevo conector en `src/exchanges/` siguiendo el patrón base).
 - Arbitraje triangular (misma exchange, otra ruta de precios).
 - Replay determinista desde NDJSON grabado (hoy: recorder; loader en evolución).
 

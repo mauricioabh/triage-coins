@@ -89,7 +89,7 @@ export function Controls({ stats, config }: Props): JSX.Element {
           <div className="flex justify-between">
             <span>Taker fees</span>
             <span className="font-mono">
-              K {pct(config.takerFees.kraken, 2)} · By {pct(config.takerFees.bybit, 2)} · O {pct(config.takerFees.okx, 2)}
+              K {pct(config.takerFees.kraken, 2)} · By {pct(config.takerFees.bybit, 2)} · O {pct(config.takerFees.okx, 2)} · Bn {pct(config.takerFees.binance, 2)}
             </span>
           </div>
           <div className="mt-1 flex justify-between">

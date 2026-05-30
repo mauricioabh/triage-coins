@@ -21,8 +21,13 @@ import type {
 } from "../domain/ports/ports.js";
 
 export class FakePolicy implements TradingPolicy {
-  takerFees: Record<ExchangeId, number> = { kraken: 0.0026, bybit: 0.001, okx: 0.001 };
-  withdrawalFeesBtc: Record<ExchangeId, number> = { kraken: 0.00002, bybit: 0.00005, okx: 0.00004 };
+  takerFees: Record<ExchangeId, number> = { kraken: 0.0026, bybit: 0.001, okx: 0.001, binance: 0.001 };
+  withdrawalFeesBtc: Record<ExchangeId, number> = {
+    kraken: 0.00002,
+    bybit: 0.00005,
+    okx: 0.00004,
+    binance: 0.0005,
+  };
   minNet = 0.0005;
   maxTrade = 0.25;
   flickerMs = 150;

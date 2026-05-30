@@ -10,6 +10,7 @@ const LABELS: Record<ExchangeId, string> = {
   kraken: "Kraken",
   bybit: "Bybit",
   okx: "OKX",
+  binance: "Binance",
 };
 
 function statusDot(status: BestQuote["status"]): string {

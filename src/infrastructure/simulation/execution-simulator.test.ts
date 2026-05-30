@@ -79,7 +79,7 @@ test("higher taker fees reduce realized net profit", () => {
 
   const policyHi = new FakePolicy();
   policyHi.latencyBps = 0;
-  policyHi.takerFees = { kraken: 0.0026, bybit: 0.0026, okx: 0.0026 };
+  policyHi.takerFees = { kraken: 0.0026, bybit: 0.0026, okx: 0.0026, binance: 0.0026 };
   const hi = new ExecutionSimulator(new FakeInventory(), policyHi, new SeqIds()).execute(opportunity(), 1);
 
   assert.ok(hi.netProfit < low.netProfit, `expected ${hi.netProfit} < ${low.netProfit}`);

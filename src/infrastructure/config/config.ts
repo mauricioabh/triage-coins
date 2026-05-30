@@ -17,12 +17,14 @@ export const TAKER_FEES: Record<ExchangeId, number> = {
   kraken: 0.0026,
   bybit: 0.001,
   okx: 0.001,
+  binance: 0.001,
 };
 
 export const WITHDRAWAL_FEES_BTC: Record<ExchangeId, number> = {
   kraken: 0.00002,
   bybit: 0.00005,
   okx: 0.00004,
+  binance: 0.0005,
 };
 
 export const config = {
