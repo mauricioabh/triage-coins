@@ -46,26 +46,50 @@ export function createRouter(app: ApplicationService, sse: SseHub): Router {
   });
 
   router.post("/control/demo", (req: Request, res: Response) => {
-    const enabled = Boolean(req.body?.enabled);
+    const enabled = req.body?.enabled;
+    if (typeof enabled !== "boolean") {
+      res.status(400).json({ success: false, error: "enabled must be a boolean" });
+      return;
+    }
     app.setDemoMode(enabled);
     res.json({ success: true, data: { demoMode: enabled } });
   });
 
   router.post("/control/record", (req: Request, res: Response) => {
-    const enabled = Boolean(req.body?.enabled);
+    const enabled = req.body?.enabled;
+    if (typeof enabled !== "boolean") {
+      res.status(400).json({ success: false, error: "enabled must be a boolean" });
+      return;
+    }
     app.setRecordFeed(enabled);
     res.json({ success: true, data: { recordFeed: enabled } });
   });
 
   router.post("/control/threshold", (req: Request, res: Response) => {
-    const pct = Number(req.body?.pct);
-    app.setThreshold(pct);
+    const pct = req.body?.pct;
+    if (typeof pct !== "number" || !Number.isFinite(pct)) {
+      res.status(400).json({ success: false, error: "pct must be a finite number" });
+      return;
+    }
+    const error = app.setThreshold(pct);
+    if (error) {
+      res.status(400).json({ success: false, error });
+      return;
+    }
     res.json({ success: true, data: { minNetProfitPct: pct } });
   });
 
   router.post("/control/max-trade", (req: Request, res: Response) => {
-    const btc = Number(req.body?.btc);
-    app.setMaxTradeBtc(btc);
+    const btc = req.body?.btc;
+    if (typeof btc !== "number" || !Number.isFinite(btc)) {
+      res.status(400).json({ success: false, error: "btc must be a finite number" });
+      return;
+    }
+    const error = app.setMaxTradeBtc(btc);
+    if (error) {
+      res.status(400).json({ success: false, error });
+      return;
+    }
     res.json({ success: true, data: { maxTradeBtc: btc } });
   });
 
