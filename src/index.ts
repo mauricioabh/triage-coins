@@ -1,4 +1,5 @@
 import express from "express";
+import swaggerUi from "swagger-ui-express";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -7,6 +8,7 @@ import { bootstrap, config } from "./composition/bootstrap.js";
 import { runtime } from "./infrastructure/config/runtime.js";
 import { SseHub } from "./interfaces/sse/sse.js";
 import { createRouter } from "./interfaces/http/routes.js";
+import { openapiSpec } from "./interfaces/http/openapi.js";
 
 const log = createLogger("server");
 
@@ -23,6 +25,11 @@ function main(): void {
   const server = express();
   server.use(express.json());
   server.use("/api", createRouter(ctx.application, sse));
+
+  server.use("/api-docs", swaggerUi.serve, swaggerUi.setup(openapiSpec, {
+    customSiteTitle: "Triage Coins — API Docs",
+    swaggerOptions: { defaultModelsExpandDepth: 2, defaultModelExpandDepth: 2 },
+  }));
 
   if (existsSync(webDist)) {
     server.use(express.static(webDist));
