@@ -55,12 +55,20 @@ export class ControlService {
     if (!enabled) this.recorder.close();
   }
 
-  setThreshold(pct: number): void {
-    if (Number.isFinite(pct) && pct >= 0 && pct <= 0.05) this.runtime.minNetProfitPct = pct;
+  setThreshold(pct: number): string | null {
+    if (!Number.isFinite(pct) || pct < MIN_PROFIT_PCT || pct > MAX_PROFIT_PCT) {
+      return `minNetProfitPct must be between ${MIN_PROFIT_PCT} and ${MAX_PROFIT_PCT}`;
+    }
+    this.runtime.minNetProfitPct = pct;
+    return null;
   }
 
-  setMaxTradeBtc(btc: number): void {
-    if (Number.isFinite(btc) && btc > 0 && btc <= 10) this.runtime.maxTradeBtc = btc;
+  setMaxTradeBtc(btc: number): string | null {
+    if (!Number.isFinite(btc) || btc < MIN_TRADE_BTC || btc > MAX_TRADE_BTC) {
+      return `maxTradeBtc must be between ${MIN_TRADE_BTC} and ${MAX_TRADE_BTC}`;
+    }
+    this.runtime.maxTradeBtc = btc;
+    return null;
   }
 
   patchConfig(patch: ConfigPatch): string | null {

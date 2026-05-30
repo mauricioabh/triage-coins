@@ -300,6 +300,17 @@ const schemas: Record<string, OpenAPIV3.SchemaObject> = {
       success: { type: "boolean", enum: [true] },
       data: { description: "Response payload (shape depends on the endpoint)." },
     },
+    additionalProperties: false,
+  },
+
+  SuccessEnvelopeNoData: {
+    type: "object",
+    required: ["success"],
+    properties: {
+      success: { type: "boolean", enum: [true] },
+    },
+    additionalProperties: false,
+    example: { success: true },
   },
 
   ErrorEnvelope: {
@@ -309,6 +320,60 @@ const schemas: Record<string, OpenAPIV3.SchemaObject> = {
       success: { type: "boolean", enum: [false] },
       error: { type: "string", description: "Human-readable error message." },
     },
+    additionalProperties: false,
+    example: { success: false, error: "enabled must be a boolean" },
+  },
+
+  DemoControlBody: {
+    type: "object",
+    required: ["enabled"],
+    properties: {
+      enabled: {
+        type: "boolean",
+        description: "`true` to activate the synthetic feed, `false` to return to live data.",
+        example: true,
+      },
+    },
+    additionalProperties: false,
+  },
+
+  RecordControlBody: {
+    type: "object",
+    required: ["enabled"],
+    properties: {
+      enabled: { type: "boolean", description: "Start or stop NDJSON feed recording.", example: false },
+    },
+    additionalProperties: false,
+  },
+
+  ThresholdControlBody: {
+    type: "object",
+    required: ["pct"],
+    properties: {
+      pct: {
+        type: "number",
+        description: "Net profit threshold as a decimal percentage (0.0001–0.01, e.g. `0.0005` = 0.05 %).",
+        minimum: 0.0001,
+        maximum: 0.01,
+        example: 0.0005,
+      },
+    },
+    additionalProperties: false,
+  },
+
+  MaxTradeControlBody: {
+    type: "object",
+    required: ["btc"],
+    properties: {
+      btc: {
+        type: "number",
+        description: "Maximum BTC volume per trade (0.01–1.0).",
+        minimum: 0.01,
+        maximum: 1.0,
+        example: 0.05,
+      },
+    },
+    additionalProperties: false,
   },
 
   ConfigPatch: {
@@ -331,30 +396,67 @@ const schemas: Record<string, OpenAPIV3.SchemaObject> = {
 // Reusable response helpers
 // ---------------------------------------------------------------------------
 
-function successResponse(description: string, dataSchema?: OpenAPIV3.SchemaObject | OpenAPIV3.ReferenceObject): OpenAPIV3.ResponseObject {
+function successResponseNoData(description: string): OpenAPIV3.ResponseObject {
   return {
     description,
     content: {
       "application/json": {
-        schema: {
-          allOf: [
-            { $ref: "#/components/schemas/SuccessEnvelope" },
-            ...(dataSchema ? [{ properties: { data: dataSchema } }] : []),
-          ],
-        },
+        schema: { $ref: "#/components/schemas/SuccessEnvelopeNoData" },
       },
     },
   };
 }
 
-const errorResponse: OpenAPIV3.ResponseObject = {
-  description: "Validation error or bad request.",
+function successResponse(description: string, dataSchema: OpenAPIV3.SchemaObject | OpenAPIV3.ReferenceObject, example?: unknown): OpenAPIV3.ResponseObject {
+  return {
+    description,
+    content: {
+      "application/json": {
+        schema: {
+          type: "object",
+          required: ["success", "data"],
+          properties: {
+            success: { type: "boolean", enum: [true] },
+            data: dataSchema,
+          },
+          additionalProperties: false,
+        },
+        ...(example !== undefined ? { example } : {}),
+      },
+    },
+  };
+}
+
+const badRequestResponse: OpenAPIV3.ResponseObject = {
+  description: "Invalid request body or out-of-range value.",
   content: {
     "application/json": {
       schema: { $ref: "#/components/schemas/ErrorEnvelope" },
     },
   },
 };
+
+const serverErrorResponse: OpenAPIV3.ResponseObject = {
+  description: "Unexpected server error.",
+  content: {
+    "application/json": {
+      schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+      example: { success: false, error: "Internal server error" },
+    },
+  },
+};
+
+function controlBodyResponses(
+  okDescription: string,
+  dataSchema: OpenAPIV3.SchemaObject | OpenAPIV3.ReferenceObject,
+  example: unknown,
+): OpenAPIV3.ResponsesObject {
+  return {
+    "200": successResponse(okDescription, dataSchema, example),
+    "400": badRequestResponse,
+    "500": serverErrorResponse,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Full OpenAPI document
@@ -411,7 +513,8 @@ that monitors live order books from **Kraken**, **Bybit** and **OKX** simultaneo
               status: { type: "string", enum: ["ok"] },
               ts: { type: "integer", description: "Server timestamp (ms epoch)." },
             },
-          }),
+          }, { success: true, data: { status: "ok", ts: 1_700_000_000_000 } }),
+          "500": serverErrorResponse,
         },
       },
     },
@@ -425,6 +528,7 @@ that monitors live order books from **Kraken**, **Bybit** and **OKX** simultaneo
         operationId: "getState",
         responses: {
           "200": successResponse("Current engine state.", { $ref: "#/components/schemas/StateSnapshot" }),
+          "500": serverErrorResponse,
         },
       },
     },
@@ -461,6 +565,7 @@ that monitors live order books from **Kraken**, **Bybit** and **OKX** simultaneo
         operationId: "getConfig",
         responses: {
           "200": successResponse("Current configuration.", { $ref: "#/components/schemas/PublicConfig" }),
+          "500": serverErrorResponse,
         },
       },
       patch: {
@@ -477,7 +582,8 @@ that monitors live order books from **Kraken**, **Bybit** and **OKX** simultaneo
         },
         responses: {
           "200": successResponse("Updated configuration.", { $ref: "#/components/schemas/PublicConfig" }),
-          "400": errorResponse,
+          "400": badRequestResponse,
+          "500": serverErrorResponse,
         },
       },
     },
@@ -490,7 +596,8 @@ that monitors live order books from **Kraken**, **Bybit** and **OKX** simultaneo
           "Manually pauses the engine. Opportunities are no longer evaluated and no new trades are executed until `resume` is called. Order book feeds remain connected. This is equivalent to setting the circuit state to `paused`.",
         operationId: "controlPause",
         responses: {
-          "200": successResponse("Engine paused."),
+          "200": successResponseNoData("Engine paused."),
+          "500": serverErrorResponse,
         },
       },
     },
@@ -503,7 +610,8 @@ that monitors live order books from **Kraken**, **Bybit** and **OKX** simultaneo
           "Resumes opportunity evaluation after a `pause` or a circuit-breaker trip. The engine immediately re-enters the `running` circuit state.",
         operationId: "controlResume",
         responses: {
-          "200": successResponse("Engine resumed."),
+          "200": successResponseNoData("Engine resumed."),
+          "500": serverErrorResponse,
         },
       },
     },
@@ -516,7 +624,8 @@ that monitors live order books from **Kraken**, **Bybit** and **OKX** simultaneo
           "Resets the simulated wallets back to their initial pre-positioned balances, clears the trade history, resets the cumulative P&L to zero, and restores the consecutive-loss counter. Engine configuration (thresholds, fee tables) is not affected. Useful for starting a clean simulation session.",
         operationId: "controlReset",
         responses: {
-          "200": successResponse("State reset."),
+          "200": successResponseNoData("State reset."),
+          "500": serverErrorResponse,
         },
       },
     },
@@ -531,23 +640,19 @@ that monitors live order books from **Kraken**, **Bybit** and **OKX** simultaneo
         requestBody: {
           required: true,
           content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["enabled"],
-                properties: {
-                  enabled: { type: "boolean", description: "`true` to activate the synthetic feed, `false` to return to live data." },
-                },
-              },
-            },
+            "application/json": { schema: { $ref: "#/components/schemas/DemoControlBody" } },
           },
         },
-        responses: {
-          "200": successResponse("Demo mode updated.", {
+        responses: controlBodyResponses(
+          "Demo mode updated.",
+          {
             type: "object",
+            required: ["demoMode"],
             properties: { demoMode: { type: "boolean" } },
-          }),
-        },
+            additionalProperties: false,
+          },
+          { success: true, data: { demoMode: true } },
+        ),
       },
     },
 
@@ -561,23 +666,19 @@ that monitors live order books from **Kraken**, **Bybit** and **OKX** simultaneo
         requestBody: {
           required: true,
           content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["enabled"],
-                properties: {
-                  enabled: { type: "boolean" },
-                },
-              },
-            },
+            "application/json": { schema: { $ref: "#/components/schemas/RecordControlBody" } },
           },
         },
-        responses: {
-          "200": successResponse("Recording state updated.", {
+        responses: controlBodyResponses(
+          "Recording state updated.",
+          {
             type: "object",
+            required: ["recordFeed"],
             properties: { recordFeed: { type: "boolean" } },
-          }),
-        },
+            additionalProperties: false,
+          },
+          { success: true, data: { recordFeed: false } },
+        ),
       },
     },
 
@@ -591,27 +692,19 @@ that monitors live order books from **Kraken**, **Bybit** and **OKX** simultaneo
         requestBody: {
           required: true,
           content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["pct"],
-                properties: {
-                  pct: {
-                    type: "number",
-                    description: "Net profit threshold as a decimal percentage (e.g. `0.05` = 0.05 %).",
-                    example: 0.05,
-                  },
-                },
-              },
-            },
+            "application/json": { schema: { $ref: "#/components/schemas/ThresholdControlBody" } },
           },
         },
-        responses: {
-          "200": successResponse("Threshold updated.", {
+        responses: controlBodyResponses(
+          "Threshold updated.",
+          {
             type: "object",
+            required: ["minNetProfitPct"],
             properties: { minNetProfitPct: { type: "number" } },
-          }),
-        },
+            additionalProperties: false,
+          },
+          { success: true, data: { minNetProfitPct: 0.0005 } },
+        ),
       },
     },
 
@@ -625,30 +718,28 @@ that monitors live order books from **Kraken**, **Bybit** and **OKX** simultaneo
         requestBody: {
           required: true,
           content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["btc"],
-                properties: {
-                  btc: {
-                    type: "number",
-                    description: "Maximum BTC volume per trade.",
-                    example: 0.01,
-                  },
-                },
-              },
-            },
+            "application/json": { schema: { $ref: "#/components/schemas/MaxTradeControlBody" } },
           },
         },
-        responses: {
-          "200": successResponse("Max trade volume updated.", {
+        responses: controlBodyResponses(
+          "Max trade volume updated.",
+          {
             type: "object",
+            required: ["maxTradeBtc"],
             properties: { maxTradeBtc: { type: "number" } },
-          }),
-        },
+            additionalProperties: false,
+          },
+          { success: true, data: { maxTradeBtc: 0.05 } },
+        ),
       },
     },
   },
 
-  components: { schemas },
+  components: {
+    schemas,
+    responses: {
+      BadRequest: badRequestResponse,
+      ServerError: serverErrorResponse,
+    },
+  },
 };

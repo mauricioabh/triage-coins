@@ -84,11 +84,11 @@ export class ApplicationService {
     this.controls.setRecordFeed(enabled);
   }
 
-  setThreshold(pct: number): void {
-    this.controls.setThreshold(pct);
+  setThreshold(pct: number): string | null {
+    return this.controls.setThreshold(pct);
   }
 
-  setMaxTradeBtc(btc: number): void {
-    this.controls.setMaxTradeBtc(btc);
+  setMaxTradeBtc(btc: number): string | null {
+    return this.controls.setMaxTradeBtc(btc);
   }
 }
