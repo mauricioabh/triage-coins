@@ -1,4 +1,4 @@
-// Mirror of the backend StateSnapshot contract (see src/types.ts).
+// Mirror of the backend StateSnapshot contract (see src/domain/entities/index.ts).
 
 export type ExchangeId = "kraken" | "bybit" | "okx" | "binance";
 export type FeedStatus = "connecting" | "live" | "stale" | "down";
