@@ -1,4 +1,7 @@
-# fly.toml — https://fly.io/docs/reference/configuration/
+# fly.toml app configuration file generated for triage-coins on 2026-05-30T17:12:36-06:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
 
 app = 'triage-coins'
 primary_region = 'sin'
@@ -6,19 +9,19 @@ primary_region = 'sin'
 [build]
 
 [env]
-  PORT = '8080'
-  MIN_NET_PROFIT_PCT = '0.0005'
-  MAX_TRADE_BTC = '0.25'
-  STALE_MS = '3000'
+  CIRCUIT_BREAKER_COOLDOWN_MS = '15000'
+  CIRCUIT_BREAKER_LOSSES = '5'
+  DEMO_MODE = 'false'
   FLICKER_CONFIRM_MS = '150'
+  INITIAL_BTC = '0.5'
+  INITIAL_USDT = '50000'
   LATENCY_MS = '120'
   LATENCY_SLIPPAGE_BPS = '2'
-  CIRCUIT_BREAKER_LOSSES = '5'
-  CIRCUIT_BREAKER_COOLDOWN_MS = '15000'
-  INITIAL_USDT = '50000'
-  INITIAL_BTC = '0.5'
-  DEMO_MODE = 'false'
+  MAX_TRADE_BTC = '0.25'
+  MIN_NET_PROFIT_PCT = '0.0005'
+  PORT = '8080'
   RECORD_FEED = 'false'
+  STALE_MS = '3000'
 
 [http_service]
   internal_port = 8080
@@ -39,3 +42,4 @@ primary_region = 'sin'
   memory = '512mb'
   cpu_kind = 'shared'
   cpus = 1
+  memory_mb = 512
